@@ -1,0 +1,34 @@
+name: hyena4d_osx
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.10
+
+  - pytorch=2.2.0
+  - torchvision=0.17.0
+  - torchaudio=2.2.0
+
+  - numpy<2
+  - scipy
+  - pandas
+  - scikit-learn
+
+  - pillow
+  - imageio
+  - h5py
+
+  - tqdm
+  - pyyaml
+
+  - pip
+
+  - pip:
+      - timm>=0.9.12
+      - einops
+      - matplotlib
+      - opencv-python
+      - nibabel
+      - typing-extensions

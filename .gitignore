@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# PyTorch checkpoints and outputs
+*.pt
+*.pth
+*.ckpt
+
+# NIfTI data (large binary files — store externally)
+input/*.nii
+input/*.nii.gz
+
+# macOS
+.DS_Store
+
+# JetBrains / VSCode
+.idea/
+.vscode/
+*.swp
+*.zip
