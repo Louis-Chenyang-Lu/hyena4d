@@ -19,8 +19,15 @@ env/
 *.ckpt
 
 # NIfTI data (large binary files — store externally)
-input/*.nii
-input/*.nii.gz
+input/**/*.nii
+input/**/*.nii.gz
+*.nii
+*.nii.gz
+
+# Test outputs and temporary data dirs
+output_test/
+pretrain_data/
+target_data/
 
 # macOS
 .DS_Store

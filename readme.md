@@ -17,6 +17,7 @@ Pack-Hyena4d_v2/
 ├── train_hyena.py               # Pre-training: contrastive loss → checkpoints
 ├── run_hyena.py                 # Inference: load checkpoint → subject embeddings
 ├── run_rpe.py                   # Standalone RPE wrapper (patch embedding only)
+├── run_demo_test.py             # End-to-end smoke test (3 checks)
 ├── invariant_patching_4d.py     # PermInvariantPatchEmbedding4D (DeepSets, chunked)
 │
 ├── hyenapixel/
@@ -28,8 +29,16 @@ Pack-Hyena4d_v2/
 │   ├── linux_env.yaml           # GPU environment (CUDA 12.1)
 │   └── os_env.yaml              # macOS environment (CPU / no MPS)
 │
-├── input/                       # Place .nii files here for training
-└── output/                      # Checkpoints and final embeddings
+├── input/
+│   ├── pretrain/                # Place pre-training .nii.gz files here
+│   └── target/                  # Place prediction-only .nii files here
+│
+├── output/                      # Checkpoints and final embeddings
+│
+├── readme.md
+├── model_description.md         # Detailed architecture (math + intuition)
+├── parameter_choices.md         # How parameters were chosen
+└── demo_test_results.md         # Results of the smoke test run
 ```
 
 ---
@@ -55,7 +64,7 @@ Recommended settings for the pre-training dataset (shape 90 × 20 × 50 × 1000,
 
 ```bash
 python train_hyena.py \
-    --input-dir    pretrain_data/ \
+    --input-dir    input/pretrain/ \
     --output-dir   output/ \
     --subject-field 0 \          # "sub-001" from "sub-001_ses-1_..._bold.nii.gz"
     --patch-size   9 4 5 10 \    # divides (90,20,50), T_sub=50 → 10×5×10×5 tokens
@@ -84,7 +93,7 @@ Recommended settings for the target dataset (shape 64 × 64 × 20 × 500,
 
 ```bash
 python run_hyena.py \
-    --input-dir    target_data/ \
+    --input-dir    input/target/ \
     --output-dir   output/ \
     --checkpoint   output/best_model.pt \
     --subject-field 1 \          # "B16" from "driftRespCardlessBOLD_B16_..."
