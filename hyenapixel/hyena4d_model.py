@@ -38,7 +38,6 @@ class Hyena4DBackbone(nn.Module):
         drop: float = 0.0,
         voxel_size: Tuple[float, float, float] = (1.0, 1.0, 1.0),
         t_gap: float = 1.0,
-        tr_slice: float = 0.0,
     ):
         super().__init__()
 
@@ -65,7 +64,6 @@ class Hyena4DBackbone(nn.Module):
                     drop=drop,
                     voxel_size=voxel_size,
                     t_gap=t_gap,
-                    tr_slice=tr_slice,
                 )
             )
         self.blocks = nn.ModuleList(blocks)
@@ -153,7 +151,6 @@ class Hyena4DContrastiveEncoder(Hyena4DBackbone):
         normalize: bool = True,
         voxel_size: Tuple[float, float, float] = (1.0, 1.0, 1.0),
         t_gap: float = 1.0,
-        tr_slice: float = 0.0,
     ):
 
         super().__init__(
@@ -166,7 +163,6 @@ class Hyena4DContrastiveEncoder(Hyena4DBackbone):
             drop=drop,
             voxel_size=voxel_size,
             t_gap=t_gap,
-            tr_slice=tr_slice,
         )
 
         self.projection_head = nn.Sequential(

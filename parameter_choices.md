@@ -133,28 +133,6 @@ if time_unit == "msec" or (time_unit == "sec" and tr > 100):
 ```
 This correctly converts TR=1500.0 (mislabelled as sec) → 1.5 s.
 
-### Slice acquisition time (`--tr-slice`)
-
-Cannot be read from the header — must be set manually.
-
-```
-tr_slice = TR / num_slices
-```
-
-| Dataset | TR | num_slices | tr_slice |
-|---|---|---|---|
-| Pre-training | 1.0 s | 50 | 0.02 s |
-| Prediction | 1.5 s | 20 | 0.075 s |
-
-This enables **slice-timing correction** inside the kernel:
-```
-t_phys = |Δt · t_gap + Δz · tr_slice|
-```
-Slice z is physically acquired at time `t·t_gap + z·tr_slice`, so two voxels
-at the same nominal timepoint but different slices have a real temporal
-separation of `|Δz · tr_slice|`.  Setting `tr_slice=0` disables the
-correction (no effect on learned weights).
-
 ---
 
 ## Network Depth (`--num-blocks`)

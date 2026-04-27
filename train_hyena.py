@@ -214,7 +214,6 @@ class Hyena4DFullPipeline(nn.Module):
         voxel_chunk: int | None,
         voxel_size: tuple = (1.0, 1.0, 1.0),
         t_gap: float = 1.0,
-        tr_slice: float = 0.0,
     ):
         super().__init__()
         self.rpe = PermInvariantPatchEmbedding4D(
@@ -233,7 +232,6 @@ class Hyena4DFullPipeline(nn.Module):
             kernel_size=kernel_size,
             voxel_size=voxel_size,
             t_gap=t_gap,
-            tr_slice=tr_slice,
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -413,11 +411,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--t-gap",          type=float, default=None,
                    help="TR / time between timepoints in seconds. "
                         "Auto-detected from the NIfTI header if not specified.")
-    p.add_argument("--tr-slice",       type=float, default=0.0,
-                   help="Time between consecutive slice acquisitions within one TR "
-                        "(seconds). Typically TR / num_slices for sequential "
-                        "acquisition. Enables slice-timing correction in the kernel. "
-                        "Default 0.0 = no slice-timing correction.")
     p.add_argument("--patch-chunk",    type=int,   default=16,
                    help="Patches per RPE forward chunk (lower = less RAM)")
     p.add_argument("--voxel-chunk",    type=int,   default=512,
@@ -499,7 +492,6 @@ def main() -> None:
         voxel_chunk=voxel_chunk,
         voxel_size=voxel_size,
         t_gap=t_gap,
-        tr_slice=args.tr_slice,
     ).to(device)
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)

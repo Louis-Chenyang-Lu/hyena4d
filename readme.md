@@ -70,8 +70,7 @@ python train_hyena.py \
     --patch-size   9 4 5 10 \    # divides (90,20,50), T_sub=50 → 10×5×10×5 tokens
     --t-sub        50 \
     --batch-size   32 \          # larger batches = more positive pairs per step
-    --epochs       50 \
-    --tr-slice     0.02          # TR/num_slices = 1.0s/50 slices
+    --epochs       50
 ```
 
 Physical parameters (voxel size, TR) are read automatically from the `.nii.gz`
@@ -97,18 +96,12 @@ python run_hyena.py \
     --output-dir   output/ \
     --checkpoint   output/best_model.pt \
     --subject-field 1 \          # "B16" from "driftRespCardlessBOLD_B16_..."
-    --patch-size   8 8 4 10 \    # divides (64,64,20), T=500 → 8×8×5×50 tokens
-    --tr-slice     0.075         # TR/num_slices = 1.5s/20 slices
+    --patch-size   8 8 4 10      # divides (64,64,20), T=500 → 8×8×5×50 tokens
 ```
 
 Physical parameters are read automatically from the `.nii` header.  Loads the
 pre-trained encoder weights and produces `subject_embeddings.pt` for the
 target cohort — **no re-training or fine-tuning occurs**.
-
-> **`--tr-slice` note**: this parameter cannot be read from the header and must
-> be set manually.  Use `TR / num_slices` for sequential acquisition (e.g.
-> 1.5 s / 20 slices = 0.075 s).  Omit or set to 0 to disable slice-timing
-> correction.
 
 ---
 
@@ -171,17 +164,14 @@ decay_mask = exp(−α_s · r_3d − α_t · t_abs)
 - `α_s ≈ 1 / spatial correlation length (mm)`
 - `α_t ≈ 1 / temporal correlation time (s)`
 
-### Physical-unit scaling (SR / TR / slice timing)
+### Physical-unit scaling (SR / TR)
 
-Three parameters bring all positional features into physical units:
+Two parameters bring all positional features into physical units:
 
 - **`--voxel-size sz sy sx`** (mm): spatial distances become `r_3d = sqrt((sz·Δz)² + (sy·Δy)² + (sx·Δx)²)` in mm.
-- **`--t-gap`** (s): the inter-volume TR.
-- **`--tr-slice`** (s): the inter-slice acquisition time within one TR (typically `TR / num_slices`). This implements **slice-timing correction** directly in the kernel: the physical temporal distance between two voxels at offset `(Δt, Δz)` is
+- **`--t-gap`** (s): the inter-volume TR. Temporal distance is `t_abs = |Δt| · t_gap`.
 
-  `t_phys = |Δt · t_gap + Δz · tr_slice|`
-
-  rather than the naïve `|Δt| · t_gap`.  Setting `tr_slice=0` (default) disables this correction.
+All slices within a volume are assumed to be acquired simultaneously.
 
 Together these make the learned decay rates `α_s` (mm⁻¹) and `α_t` (s⁻¹) scanner-independent.
 
@@ -244,7 +234,6 @@ conda activate hyena4d_linux
 | `--kernel-size T Z H W` | `3 3 3 3` | Hyena4D filter kernel size |
 | `--voxel-size SZ SY SX` | auto | Voxel side lengths in mm (z, y, x); auto-detected from NIfTI header if omitted |
 | `--t-gap` | auto | TR / time between timepoints in seconds; auto-detected from NIfTI header if omitted |
-| `--tr-slice` | `0.0` | Time between consecutive slice acquisitions within one TR (s); use `TR/num_slices` for sequential acquisition; `0` = disabled |
 | `--patch-chunk` | `16` | Patches per RPE forward chunk |
 | `--voxel-chunk` | `512` | Voxels per inner RPE chunk (0 = disabled) |
 | `--epochs` | `50` | Training epochs |
@@ -274,7 +263,6 @@ conda activate hyena4d_linux
 | `--subject-field` | `1` | Token index in filename (split on `_`) for subject ID; use `0` for BIDS-style `sub-001_...` names |
 | `--voxel-size SZ SY SX` | auto | Voxel side lengths in mm (z, y, x); auto-detected from NIfTI header if omitted |
 | `--t-gap` | auto | TR / time between timepoints in seconds; auto-detected from NIfTI header if omitted |
-| `--tr-slice` | `0.0` | Must match the value used during training; `TR/num_slices` for sequential acquisition |
 
 ---
 

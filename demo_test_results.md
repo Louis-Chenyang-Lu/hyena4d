@@ -23,7 +23,6 @@ Key settings used:
 - `--batch-size 3` — small batch for demo; in real training use 32+
 - `--epochs 3` — short demo run; real training uses 50
 - `--subject-field 0` — extracts `sub-001` from BIDS-style filenames
-- `--tr-slice 0.02` — slice-timing correction (TR=1.0s / 50 slices)
 - Physical parameters (voxel size, TR) auto-detected from NIfTI header
 
 Saves `output_test/best_model.pt` (lowest-loss epoch) and
@@ -41,7 +40,6 @@ Key settings used:
 - `--checkpoint output_test/best_model.pt` — loads the pre-trained weights
 - `--patch-size 8 8 4 10` — divides (64, 64, 20) evenly
 - `--subject-field 1` — extracts `B16` from the filename
-- `--tr-slice 0.075` — slice-timing correction (TR=1.5s / 20 slices)
 - No re-training occurs — encoder weights are frozen
 
 Saves `output_test/target_embeddings.pt`.

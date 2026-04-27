@@ -81,7 +81,6 @@ train_cmd = [
     "--t-sub",          "50",
     "--batch-size",     "3",          # 3 subjects × 20 windows = 60 samples
     "--epochs",         "3",          # short demo run
-    "--tr-slice",       "0.02",       # TR=1.0s / 50 slices
     "--embed-dim",      "64",
     "--num-blocks",     "4",
     "--projection-dim", "128",
@@ -102,7 +101,6 @@ infer_cmd = [
     "--checkpoint",     "output_test/best_model.pt",
     "--subject-field",  "1",          # driftRespCardlessBOLD_B16_... → field 1
     "--patch-size",     "8", "8", "4", "10",
-    "--tr-slice",       "0.075",      # TR=1.5s / 20 slices
     "--embed-dim",      "64",
     "--num-blocks",     "4",
     "--projection-dim", "128",

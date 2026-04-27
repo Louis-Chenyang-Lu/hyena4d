@@ -12,7 +12,6 @@ def make_4d_positional_features(
     kernel_size: Tuple[int, int, int, int],
     voxel_size: Tuple[float, float, float] = (1.0, 1.0, 1.0),
     t_gap: float = 1.0,
-    tr_slice: float = 0.0,
     device: torch.device | None = None,
 ) -> torch.Tensor:
     """
@@ -21,12 +20,8 @@ def make_4d_positional_features(
     Rotation invariance in the 3D spatial axes (z, y, x) means kernel values must
     depend only on scalars that are invariant under SO(3) rotations of (z, y, x).
 
-    Physical-unit temporal distance with slice-timing correction:
-        t_phys = |Δt * t_gap + Δz * tr_slice|
-
-    This captures the fact that slice z is acquired at physical time
-    t * t_gap + z * tr_slice within the scan, so the true temporal separation
-    between voxels at offsets (Δt, Δz) is Δt * t_gap + Δz * tr_slice.
+    Temporal distance uses the volume TR only (all slices assumed simultaneous):
+        t_abs = |Δt| * t_gap
 
     Args:
         kernel_size : (Kt, Kz, Kh, Kw)
@@ -34,23 +29,18 @@ def make_4d_positional_features(
                       Default (1, 1, 1) = voxel-index units (no physical scaling).
         t_gap       : time between consecutive timepoints in seconds (e.g. TR).
                       Default 1.0 = timepoint-index units (no physical scaling).
-        tr_slice    : time between consecutive slice acquisitions within one TR,
-                      in seconds.  Set to TR / num_slices for a typical
-                      sequential acquisition.  Default 0.0 disables slice-timing
-                      correction (reduces to |Δt| * t_gap).
         device      : optional torch device
 
     Returns:
         pos_feats : Tensor of shape [Kt * Kz * Kh * Kw, 6]
-                    Columns: [t_phys, r_3d_phys, r_4d_phys,
+                    Columns: [t_abs, r_3d_phys, r_4d_phys,
                                decay_t, decay_3d, decay_4d]
                     All distance/time values are in physical units when
-                    voxel_size, t_gap, and tr_slice are set correctly.
+                    voxel_size and t_gap are set correctly.
     """
     Kt, Kz, Kh, Kw = kernel_size
     sz, sy, sx = float(voxel_size[0]), float(voxel_size[1]), float(voxel_size[2])
-    tg  = float(t_gap)
-    trs = float(tr_slice)
+    tg = float(t_gap)
 
     t_coords = torch.arange(Kt, dtype=torch.float32) - (Kt - 1) / 2.0
     z_coords = torch.arange(Kz, dtype=torch.float32) - (Kz - 1) / 2.0
@@ -67,10 +57,8 @@ def make_4d_positional_features(
         t_coords, z_coords, y_coords, x_coords, indexing="ij"
     )  # [Kt, Kz, Kh, Kw]
 
-    # --- Physical temporal distance with slice-timing correction ---
-    # t_phys = |Δt * t_gap + Δz * tr_slice|
-    # When tr_slice=0 this reduces to |Δt| * t_gap (no correction).
-    t_abs = (T * tg + Z * trs).abs()   # physical seconds
+    # Physical temporal distance: |Δt| * t_gap  (all slices assumed simultaneous)
+    t_abs = T.abs() * tg   # physical seconds
 
     # --- Spatial distances in physical mm ---
     Zp = Z * sz
@@ -125,7 +113,6 @@ class Hyena4DFilter(nn.Module):
         hidden_dim: int = 64,
         voxel_size: Tuple[float, float, float] = (1.0, 1.0, 1.0),
         t_gap: float = 1.0,
-        tr_slice: float = 0.0,
     ):
         """
         Args:
@@ -135,16 +122,13 @@ class Hyena4DFilter(nn.Module):
             voxel_size  : (sz, sy, sx) voxel side lengths in mm — scales spatial
                           positional features to physical distances
             t_gap       : time between consecutive timepoints in seconds (e.g. TR)
-            tr_slice    : time between consecutive slice acquisitions within one TR
-                          (seconds).  Set to TR / num_slices for sequential acquisition.
-                          Default 0.0 disables slice-timing correction.
         """
         super().__init__()
         self.d_model = d_model
         self.kernel_size = kernel_size
 
         pos_feats = make_4d_positional_features(
-            kernel_size, voxel_size=voxel_size, t_gap=t_gap, tr_slice=tr_slice
+            kernel_size, voxel_size=voxel_size, t_gap=t_gap
         )  # [N_pos, 6]
         self.register_buffer("pos_feats", pos_feats, persistent=False)
 
@@ -238,7 +222,6 @@ class Hyena4DPixelBlock(nn.Module):
         drop: float = 0.0,
         voxel_size: Tuple[float, float, float] = (1.0, 1.0, 1.0),
         t_gap: float = 1.0,
-        tr_slice: float = 0.0,
     ):
         super().__init__()
         self.d_model = d_model
@@ -248,7 +231,7 @@ class Hyena4DPixelBlock(nn.Module):
         self.norm2 = nn.LayerNorm(d_model)
 
         self.hyena4d = Hyena4DFilter(
-            d_model, kernel_size, voxel_size=voxel_size, t_gap=t_gap, tr_slice=tr_slice
+            d_model, kernel_size, voxel_size=voxel_size, t_gap=t_gap
         )
 
         mlp_hidden = int(d_model * mlp_ratio)

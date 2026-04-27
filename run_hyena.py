@@ -131,10 +131,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--t-gap", type=float, default=None,
                         help="TR / time between timepoints in seconds. "
                              "Auto-detected from NIfTI header if not specified.")
-    parser.add_argument("--tr-slice", type=float, default=0.0,
-                        help="Time between consecutive slice acquisitions within one TR "
-                             "(seconds). Must match the value used during training. "
-                             "Default 0.0 = no slice-timing correction.")
     return parser.parse_args()
 
 
@@ -215,7 +211,6 @@ def main() -> None:
                     kernel_size=(3, 3, 3, 3),
                     voxel_size=voxel_size,
                     t_gap=t_gap,
-                    tr_slice=args.tr_slice,
                 ).to(device).eval()
 
                 if args.checkpoint is not None:

@@ -68,10 +68,8 @@ studies.  Two parameters capture this:
 - **`voxel_size` = $(s_z, s_y, s_x)$ mm**: the side lengths of one voxel along
   each spatial axis.
 - **`t_gap` = $\Delta T$ s**: the time between consecutive timepoints (full-brain TR).
-- **`tr_slice` = $\Delta T_\text{slice}$ s**: the time between the acquisition of
-  consecutive slices within a single TR.  For a sequential acquisition of $N_z$
-  slices this equals $\Delta T / N_z$.  Default 0 disables the correction.
 
+All slices within a volume are assumed to be acquired simultaneously.
 These are passed at model construction time and baked into the kernel's
 positional features (see §4).  Using physical units makes the learned decay
 rates scanner-independent.
@@ -171,8 +169,8 @@ together define a kernel that:
 - has the same value at all spatial offsets with the same 3D Euclidean distance
   from the origin (radial symmetry → rotation equivariance),
 - decays toward zero as spatial or temporal distance increases (locality prior),
-- is parameterised in **physical units** (mm, seconds) when `voxel_size`,
-  `t_gap`, and `tr_slice` are provided.
+- is parameterised in **physical units** (mm, seconds) when `voxel_size`
+  and `t_gap` are provided.
 
 ### 4.2 Positional feature construction
 
@@ -183,23 +181,13 @@ $$\Delta t \in \left[-\tfrac{K_t-1}{2},\; \tfrac{K_t-1}{2}\right], \quad
   \Delta z \in \left[-\tfrac{K_z-1}{2},\; \tfrac{K_z-1}{2}\right], \quad
   \Delta y, \Delta x \; \text{analogously}$$
 
-Scale to physical units, including **slice-timing correction**:
+Scale to physical units (all slices assumed simultaneous):
 
-$$t_\text{phys} = |\Delta t \cdot \Delta T + \Delta z \cdot \Delta T_\text{slice}|, \qquad
+$$t_\text{abs} = |\Delta t| \cdot \Delta T, \qquad
   \mathbf{r} = (s_z \Delta z,\; s_y \Delta y,\; s_x \Delta x)$$
 
-**Slice-timing correction** accounts for the fact that in a typical fMRI
-acquisition, each axial slice is not acquired simultaneously: slice $z$ is
-measured at physical time $t \cdot \Delta T + z \cdot \Delta T_\text{slice}$
-within the scan.  The true physical temporal separation between two voxels at
-kernel offsets $(\Delta t, \Delta z)$ is therefore
-$\Delta t \cdot \Delta T + \Delta z \cdot \Delta T_\text{slice}$, not
-just $|\Delta t| \cdot \Delta T$.  For a sequential acquisition of $N_z$ slices,
-$\Delta T_\text{slice} = \Delta T / N_z$.  Setting $\Delta T_\text{slice} = 0$
-(default) disables the correction and reduces to $t_\text{phys} = |\Delta t| \cdot \Delta T$.
-
-where $\Delta T$ is `t_gap`, $\Delta T_\text{slice}$ is `tr_slice`, and
-$(s_z, s_y, s_x)$ is `voxel_size`.  Compute the rotation-invariant scalars:
+where $\Delta T$ is `t_gap` and $(s_z, s_y, s_x)$ is `voxel_size`.
+Compute the rotation-invariant scalars:
 
 $$r_{3d} = \|\mathbf{r}\|_2 = \sqrt{(s_z\Delta z)^2 + (s_y\Delta y)^2 + (s_x\Delta x)^2}
 \quad \text{[mm]}$$
@@ -553,7 +541,7 @@ The exact count depends on configuration.  Run
 | **RPE patch grid** | Fixed axis-aligned | Breaks rotation invariance; computationally cheap |
 | **T×Z axis merging** | Conv3d over merged D=T×Z | Efficient; treats (Δt,Δz) depth uniformly |
 | **Time ≠ 4th spatial dim** | Separate α_s, α_t decay rates | Biologically motivated; not purely symmetric |
-| **Slice-timing correction** | `t_phys = \|Δt·T_gap + Δz·TR_slice\|` | Accounts for within-TR slice acquisition order; disabled by default (tr_slice=0) |
+| **Simultaneous slice assumption** | `t_abs = \|Δt\|·T_gap` | All slices treated as acquired at the same time within a TR |
 | **Contrastive positive definition** | Same subject = positive | No within-subject structure; assumes intra-subject similarity |
 | **Global mean pool** | Averages over all positions | Throws away spatial layout; needed for rotation invariance |
 | **No fine-tuning step** | Pre-train → direct embedding | Suitable for unsupervised downstream analysis |
