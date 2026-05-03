@@ -1,34 +1,29 @@
 # Hyena4D Model Description
-## Architecture, Mathematics, and Intuition
+## Architecture, Mathematics, and Notation
 
 ---
 
-## 0. Big Picture
+## 0. Notation and Conventions
 
-Hyena4D is a **self-supervised spatiotemporal encoder** for 4D fMRI data.
-The input is a 4D NIfTI volume of shape $[H, W, Z, T]$ (height × width ×
-slices × timepoints).  The output is a fixed-length embedding vector per
-subject that can be used for downstream tasks such as clustering, classification,
-or inter-subject comparison.
+Throughout this document the following notation is used.
 
-The pipeline has two stages:
-
-1. **Pre-training** (contrastive): The encoder is trained on a cohort so that
-   subsequences from the *same* mouse produce similar embeddings and subsequences
-   from *different* mice produce dissimilar ones.  No labels are needed — subject
-   identity (parsed from the filename) is the only supervision.
-
-2. **Inference** (subject embedding extraction): The trained encoder is run on
-   any set of NIfTI files.  All subsequences belonging to one subject are
-   mean-pooled into a single representative embedding vector.
-
-The architecture is built from two modules:
-
-- **PermInvariantPatchEmbedding4D (RPE)** — tokenises the volume into a grid of
-  patch embeddings using a DeepSets MLP.
-- **Hyena4DContrastiveEncoder** — processes the token grid with a stack of
-  Hyena4DPixelBlocks (each containing a spatiotemporal filter + channel MLP),
-  then projects to a unit-norm embedding.
+- $B$ — batch size.
+- $H, W, Z, T$ — spatial height, width, depth (slices), and temporal length of an fMRI
+  volume in voxel units.
+- $s_x, s_y, s_z$ — physical voxel side lengths in mm along the $x$, $y$, $z$ axes
+  (e.g. $s_x = s_y = 0.5$ mm, $s_z = 0.75$ mm).  Together they form
+  `voxel_size` $= (s_z, s_y, s_x)$.
+- $\Delta T$ — the repetition time (TR) in seconds, i.e. the temporal gap between
+  consecutive timepoints (`t_gap`).
+- $p_H, p_W, p_Z, p_T$ — patch sizes along each axis; $N_p = p_H p_W p_Z p_T$.
+- $H_p = H/p_H,\; W_p = W/p_W,\; Z_p = Z/p_Z,\; T_p = T/p_T$ — patch grid dimensions
+  (integer division required).
+- $C, d_\text{hidden}, d_\text{out}, d_\text{model}, d_\text{proj}$ — various channel /
+  embedding widths.
+- $K_t, K_z, K_h, K_w$ — kernel sizes; $N_\text{pos} = K_t K_z K_h K_w$.
+- $\text{GELU}(u) = u\,\Phi(u)$ where $\Phi$ is the standard normal CDF.
+- $\text{softplus}(u) = \ln(1 + e^u) > 0$.
+- $\text{LN}$ — LayerNorm over the channel dimension.
 
 ---
 
@@ -36,124 +31,145 @@ The architecture is built from two modules:
 
 ### 1.1 Volume format
 
-Each scan is stored as a NIfTI file and loaded as a float32 array of shape
-$[H, W, Z, T]$, where:
-
-- $H, W$ are the in-plane spatial dimensions (e.g. $64 \times 64$ pixels),
-- $Z$ is the number of axial slices (e.g. 20),
-- $T$ is the number of timepoints in the full scan (e.g. 500).
+Each scan is loaded from a NIfTI file as a float32 array of shape $[H, W, Z, T]$.
+All slices within a volume are assumed to be acquired simultaneously (no slice-timing
+correction).
 
 ### 1.2 Temporal subsequencing (training only)
 
-Processing the full temporal dimension is memory-intensive because the Hyena4D
-filter operates over a merged $T \times Z$ depth axis.  During training, the
-scan is divided into non-overlapping windows of length $T_\text{sub}$:
+During training, the full temporal dimension is split into non-overlapping windows.
+Given stride $s$ (default $s = T_\text{sub}$):
 
-$$\text{window}_k = \text{vol}[\ldots,\, k \cdot s \,:\, k \cdot s + T_\text{sub}]$$
+$$\text{window}_k = \text{vol}\!\left[\ldots,\; k \cdot s \;:\; k \cdot s + T_\text{sub}\right],
+\quad k = 0, 1, \ldots, \left\lfloor\frac{T - T_\text{sub}}{s}\right\rfloor$$
 
-where $s$ is the stride (default $s = T_\text{sub}$, giving non-overlapping
-windows).  Each window has shape $[H, W, Z, T_\text{sub}]$ and is treated as an
-independent training sample labelled with its subject ID.
+Each window has shape $[H, W, Z, T_\text{sub}]$ and is treated as an independent
+training sample labelled with its subject ID.  The NIfTI file is memory-mapped, so
+only the bytes covering $[\ldots, t_\text{start} : t_\text{start} + T_\text{sub}]$
+are read per sample.
 
-**Lazy loading**: The NIfTI file is memory-mapped; only the requested temporal
-slice $[\ldots, t_\text{start} : t_\text{start} + T_\text{sub}]$ is read from
-disk per sample, keeping RAM usage bounded regardless of scan length.
+### 1.3 Physical unit scaling
 
-### 1.3 Physical-unit scaling
+Two scanner-dependent parameters are passed at model construction:
 
-fMRI voxels have physical dimensions (in mm) and timepoints are separated by the
-repetition time TR (in seconds).  These are scanner-dependent and vary across
-studies.  Two parameters capture this:
+$$\text{voxel\_size} = (s_z, s_y, s_x)\ \text{mm}, \qquad \text{t\_gap} = \Delta T\ \text{s}$$
 
-- **`voxel_size` = $(s_z, s_y, s_x)$ mm**: the side lengths of one voxel along
-  each spatial axis.
-- **`t_gap` = $\Delta T$ s**: the time between consecutive timepoints (full-brain TR).
-
-All slices within a volume are assumed to be acquired simultaneously.
-These are passed at model construction time and baked into the kernel's
-positional features (see §4).  Using physical units makes the learned decay
-rates scanner-independent.
+These convert voxel-index offsets to true physical distances and are baked into the
+kernel's positional buffers (see §4.2).
 
 ---
 
 ## 2. PermInvariantPatchEmbedding4D (RPE)
 
-### 2.1 Purpose and intuition
+### 2.1 Input and patch partitioning
 
-A raw fMRI volume has $H \times W \times Z \times T$ scalar values — tens of
-millions of numbers.  Feeding these directly into a sequence model would be
-prohibitively expensive.  The RPE compresses the volume into a much smaller
-grid of **patch tokens** by treating each local patch as a *set* of voxels and
-encoding it with a DeepSets network.
+Input tensor: $\mathbf{X} \in \mathbb{R}^{B \times C \times H \times W \times Z \times T}$
+(here $C = 1$ for a single-channel fMRI volume).
 
-### 2.2 Patch partitioning
+Define patch-grid dimensions:
+$$H_p = \lfloor H / p_H \rfloor, \quad
+  W_p = \lfloor W / p_W \rfloor, \quad
+  Z_p = \lfloor Z / p_Z \rfloor, \quad
+  T_p = \lfloor T / p_T \rfloor$$
 
-The volume $[H, W, Z, T]$ is divided into non-overlapping patches of size
-$(p_H, p_W, p_Z, p_T)$.  This yields a regular grid of
+The volume is partitioned into $N_\text{patches} = B \cdot H_p W_p Z_p T_p$
+non-overlapping patches.  Explicitly, using the index notation
+$i_H \in \{0,\ldots,H_p{-}1\}$ and similarly for the other axes, patch
+$(i_H, i_W, i_Z, i_T)$ of sample $b$ contains the voxel set:
 
-$$H_p = H/p_H, \quad W_p = W/p_W, \quad Z_p = Z/p_Z, \quad T_p = T/p_T$$
+$$\mathcal{V}_{b,i_H,i_W,i_Z,i_T} = \bigl\{
+  X_{b,c,\, i_H p_H + \delta_h,\; i_W p_W + \delta_w,\; i_Z p_Z + \delta_z,\; i_T p_T + \delta_t}
+  \;\Big|\;
+  \delta_h \in [p_H],\; \delta_w \in [p_W],\; \delta_z \in [p_Z],\; \delta_t \in [p_T]
+\bigr\}$$
 
-patches (integer division required).  The patch size must evenly divide each
-volume dimension.
+where $[n] = \{0,\ldots,n{-}1\}$.  This is implemented as a single reshape-and-permute:
 
-### 2.3 DeepSets encoding
+$$\mathbf{X} \in \mathbb{R}^{B \times C \times H \times W \times Z \times T}
+\;\xrightarrow{\text{view}}\;
+\mathbb{R}^{B \times C \times H_p \times p_H \times W_p \times p_W \times Z_p \times p_Z \times T_p \times p_T}
+\;\xrightarrow{\text{permute}}\;
+\mathbb{R}^{B H_p W_p Z_p T_p \times N_p \times C}$$
 
-Each patch contains $N_p = p_H \times p_W \times p_Z \times p_T$ scalar voxel
-values.  The DeepSets framework encodes a set $\{v_1, \ldots, v_{N_p}\}$ via:
+giving a matrix of shape $[N_\text{patches},\; N_p,\; C]$ where
+$N_p = p_H p_W p_Z p_T$ is the number of voxels per patch.
 
-$$\mathbf{e}_\text{patch} = \rho\!\left(\frac{1}{N_p} \sum_{i=1}^{N_p} \phi(v_i)\right)$$
+### 2.2 Per-voxel embedding: the phi MLP
 
-where:
+Each voxel value $v \in \mathbb{R}^C$ is lifted to a hidden vector by:
 
-- $\phi : \mathbb{R} \to \mathbb{R}^{d_\text{hidden}}$ is a small MLP applied
-  **independently** to each voxel value (the *inner* or *phi* network),
-- the sum is a mean pool over all $N_p$ voxel embeddings in the patch,
-- $\rho : \mathbb{R}^{d_\text{hidden}} \to \mathbb{R}^{d_\text{out}}$ is a
-  linear layer (the *outer* or *rho* network) that maps the pooled embedding
-  to the final patch token dimension.
+$$\phi(v) = \text{GELU}\!\Bigl(W_2\,\text{GELU}(W_1 v + b_1) + b_2\Bigr)
+\;\in\; \mathbb{R}^{d_\text{hidden}}$$
 
-**Why DeepSets?** The mean pool over $\phi$-embeddings is a universal
-permutation-invariant function (Zaheer et al., 2017).  This means the patch
-embedding is unchanged if the voxels within the patch are reordered — the
-encoding depends only on the *multiset* of values, not their order.
+where $W_1 \in \mathbb{R}^{d_\text{hidden} \times C}$,
+$b_1 \in \mathbb{R}^{d_\text{hidden}}$,
+$W_2 \in \mathbb{R}^{d_\text{hidden} \times d_\text{hidden}}$,
+$b_2 \in \mathbb{R}^{d_\text{hidden}}$ are shared across all voxels and patches.
 
-### 2.4 Output layout
+This is computed efficiently as:
 
-After encoding all $H_p \times W_p \times Z_p \times T_p$ patches, the tokens
-are stacked into a tensor of shape
+$$\Phi = \phi\!\left(\mathbf{X}_\text{patches}\right)
+\in \mathbb{R}^{N_\text{patches} \times N_p \times d_\text{hidden}}$$
 
-$$[B,\; d_\text{out},\; H_p,\; W_p,\; Z_p,\; T_p]$$
+by reshaping the patch matrix to $[N_\text{patches} \cdot N_p,\; C]$, applying the
+linear layers, then reshaping back.
 
-This is then permuted to the Hyena4D layout:
+### 2.3 Permutation-invariant aggregation (mean pooling)
 
-$$[B,\; d_\text{out},\; T_p,\; Z_p,\; H_p,\; W_p]$$
+The $N_p$ per-voxel embeddings within each patch are aggregated by mean pooling:
 
-### 2.5 Chunked computation
+$$\bar{\phi}_p = \frac{1}{N_p} \sum_{i=1}^{N_p} \phi(v_i^{(p)})
+\;\in\; \mathbb{R}^{d_\text{hidden}}, \qquad p = 1,\ldots,N_\text{patches}$$
 
-Patch encoding is done in chunks of `patch_chunk` patches at a time to keep
-peak RAM bounded.  For large volumes (e.g. $8 \times 8 \times 5 \times 1 = 320$
-patches at $64^2 \times 20 \times 500$ voxels) this is essential.
+This operation is a sufficient statistic for universal permutation-invariant
+functions over the voxel multiset (Zaheer et al., 2017), and is implemented as
+`.mean(dim=1)` over the $N_p$ axis, yielding shape
+$[N_\text{patches},\; d_\text{hidden}]$.
 
-### 2.6 Rotation-breaking behaviour
+### 2.4 Patch-level projection: the rho linear
 
-The RPE assigns each voxel to a patch based on its position on a fixed
-axis-aligned grid.  After a spatial rotation, the same voxels land in
-*different* grid cells, producing a different token grid.  The RPE therefore
-**breaks rotation equivariance**, which is intentional: the encoder downstream
-learns spatially structured representations that are tied to the coordinate frame
-of the scanner.
+The pooled embedding is projected to the final patch token dimension by:
+
+$$\mathbf{e}_p = \rho(\bar{\phi}_p) = W_\rho\,\bar{\phi}_p + b_\rho
+\;\in\; \mathbb{R}^{d_\text{out}}$$
+
+where $W_\rho \in \mathbb{R}^{d_\text{out} \times d_\text{hidden}}$,
+$b_\rho \in \mathbb{R}^{d_\text{out}}$.
+
+The full DeepSets encoding is therefore:
+
+$$\mathbf{e}_p = W_\rho \left(\frac{1}{N_p}\sum_{i=1}^{N_p}\phi(v_i^{(p)})\right) + b_\rho$$
+
+### 2.5 Output layout
+
+After encoding all patches, the embeddings are collected and reshaped:
+
+$$[N_\text{patches},\; d_\text{out}]
+= [B \cdot H_p W_p Z_p T_p,\; d_\text{out}]
+\;\xrightarrow{\text{view}}\;
+[B,\; H_p,\; W_p,\; Z_p,\; T_p,\; d_\text{out}]
+\;\xrightarrow{\text{permute}}\;
+[B,\; d_\text{out},\; H_p,\; W_p,\; Z_p,\; T_p]$$
+
+### 2.6 Chunked computation
+
+Encoding is done in blocks of `patch_chunk` patches at a time to bound peak RAM.
+Within each block, all $N_p$ voxel embeddings are computed simultaneously unless
+`voxel_chunk` is also set (for extremely large patches).
 
 ---
 
 ## 3. Axis Permutation
 
-After the RPE, the token grid is reshaped:
+The RPE outputs $[B,\; d_\text{out},\; H_p,\; W_p,\; Z_p,\; T_p]$.
+The Hyena4D encoder expects $[B,\; C,\; T,\; Z,\; H,\; W]$, so the axes are
+permuted:
 
-$$[B,\; C,\; H_p,\; W_p,\; Z_p,\; T_p] \;\longrightarrow\; [B,\; C,\; T_p,\; Z_p,\; H_p,\; W_p]$$
+$$[B,\; d_\text{out},\; H_p,\; W_p,\; Z_p,\; T_p]
+\;\xrightarrow{\text{permute}(0,1,5,4,2,3)}\;
+[B,\; d_\text{out},\; T_p,\; Z_p,\; H_p,\; W_p]$$
 
-This reordering places the temporal dimension first inside the spatial block,
-matching the `[B, C, T, Z, H, W]` convention expected by the Hyena4D encoder.
-No data is copied — this is a `.permute().contiguous()` call.
+No data is copied — this is a metadata-only `.permute().contiguous()` call.
 
 ---
 
@@ -161,213 +177,286 @@ No data is copied — this is a `.permute().contiguous()` call.
 
 ### 4.1 Design goal
 
-The Hyena4D filter is a **depthwise, data-independent, learnable convolutional
-kernel** whose weights are generated by a small MLP conditioned on
-**rotation-invariant positional features**.  The MLP output + learnable decay
-together define a kernel that:
+The filter is a **depthwise, data-independent convolutional kernel** whose weights
+are generated by a small MLP conditioned on rotation-invariant positional features.
+The resulting kernel:
 
-- has the same value at all spatial offsets with the same 3D Euclidean distance
-  from the origin (radial symmetry → rotation equivariance),
-- decays toward zero as spatial or temporal distance increases (locality prior),
-- is parameterised in **physical units** (mm, seconds) when `voxel_size`
-  and `t_gap` are provided.
+1. Has the same weight at all spatial positions equidistant from the origin (radially
+   symmetric in $z, y, x$ physical space).
+2. Is modulated by a learnable Gaussian decay ensuring locality.
+3. Is parameterised in **physical units** (mm, seconds) so that learned decay rates
+   generalise across scanners.
 
 ### 4.2 Positional feature construction
 
-For a kernel of size $(K_t, K_z, K_h, K_w)$, define integer offset grids
+For a kernel of size $(K_t, K_z, K_h, K_w)$, define integer index offset grids
 centred at zero:
 
-$$\Delta t \in \left[-\tfrac{K_t-1}{2},\; \tfrac{K_t-1}{2}\right], \quad
-  \Delta z \in \left[-\tfrac{K_z-1}{2},\; \tfrac{K_z-1}{2}\right], \quad
-  \Delta y, \Delta x \; \text{analogously}$$
+$$\Delta t \in \left\{-\tfrac{K_t-1}{2},\; \ldots,\; \tfrac{K_t-1}{2}\right\}, \quad
+  \Delta z \in \left\{-\tfrac{K_z-1}{2},\; \ldots,\; \tfrac{K_z-1}{2}\right\}$$
 
-Scale to physical units (all slices assumed simultaneous):
+and analogously $\Delta y$, $\Delta x$ for $K_h$ and $K_w$.  These are half-integer
+when the kernel dimension is even, ensuring a symmetric grid.
 
-$$t_\text{abs} = |\Delta t| \cdot \Delta T, \qquad
-  \mathbf{r} = (s_z \Delta z,\; s_y \Delta y,\; s_x \Delta x)$$
+**True physical distances** (accounting for scanner resolution):
 
-where $\Delta T$ is `t_gap` and $(s_z, s_y, s_x)$ is `voxel_size`.
-Compute the rotation-invariant scalars:
+$$\delta X = \Delta x \cdot s_x \;[\text{mm}], \quad
+  \delta Y = \Delta y \cdot s_y \;[\text{mm}], \quad
+  \delta Z = \Delta z \cdot s_z \;[\text{mm}], \quad
+  \delta T = |\Delta t| \cdot \Delta T \;[\text{s}]$$
 
-$$r_{3d} = \|\mathbf{r}\|_2 = \sqrt{(s_z\Delta z)^2 + (s_y\Delta y)^2 + (s_x\Delta x)^2}
-\quad \text{[mm]}$$
+where $s_x, s_y, s_z$ are voxel side lengths and $\Delta T$ is `t_gap`.  The
+absolute value is used for $\delta T$ because the decay should be symmetric in time.
 
-$$r_{4d} = \sqrt{t_\text{phys}^2 + r_{3d}^2}
-\quad \text{[mixed units]}$$
+**Rotation-invariant derived scalars:**
 
-Six features are assembled per kernel position:
+$$r_{3d} = \sqrt{(\delta Z)^2 + (\delta Y)^2 + (\delta X)^2} \;[\text{mm}]$$
 
-$$\mathbf{f} = \bigl[\;t_\text{phys},\; r_{3d},\; r_{4d},\;
-\underbrace{\tfrac{1}{1+t_\text{phys}}}_{\text{decay}_t},\;
-\underbrace{\tfrac{1}{1+r_{3d}}}_{\text{decay}_{3d}},\;
-\underbrace{\tfrac{1}{1+r_{4d}}}_{\text{decay}_{4d}}\;\bigr]
+$$r_{4d} = \sqrt{(\delta T)^2 + (\delta Z)^2 + (\delta Y)^2 + (\delta X)^2}
+\;[\text{mixed units}]$$
+
+**Six positional features assembled per kernel position:**
+
+$$\mathbf{f} =
+\left[
+  \delta T,\;
+  r_{3d},\;
+  r_{4d},\;
+  \frac{1}{1+\delta T},\;
+  \frac{1}{1+r_{3d}},\;
+  \frac{1}{1+r_{4d}}
+\right]
 \in \mathbb{R}^6$$
 
-These features are computed **once at model construction** and cached as
-non-persistent buffers.  They are fixed for the lifetime of the model.
+The first three capture physical scale; the last three are monotone-decreasing
+locality priors.  The full tensor has shape $[N_\text{pos},\; 6]$ where
+$N_\text{pos} = K_t K_z K_h K_w$.
 
-**Why only these features?**  Raw signed coordinates $(\Delta t, \Delta z,
-\Delta y, \Delta x)$ are NOT included because they encode direction, which
-changes under rotation.  Functions of $r_{3d}$ and $t_\text{phys}$ are
-invariant under any rotation of the $(z, y, x)$ axes, so the resulting kernel
-is the same in all orientations.
+These features are computed **once at model construction** and registered as a
+non-persistent buffer, so they are fixed throughout training.
+
+Raw signed offsets $(\Delta t, \Delta z, \Delta y, \Delta x)$ are deliberately
+excluded: they encode direction and change under spatial rotations, breaking the
+radial-symmetry property.
+
+**Additional decay buffers** (also computed at construction and cached):
+
+$$r^2_{3d} = (\delta Z)^2 + (\delta Y)^2 + (\delta X)^2 \;[\text{mm}^2]
+\quad \longrightarrow \text{buffer } \mathtt{r3d\_sq\_flat} \in \mathbb{R}^{N_\text{pos}}$$
+
+$$(\delta T)^2 = (|\Delta t| \cdot \Delta T)^2 \;[\text{s}^2]
+\quad \longrightarrow \text{buffer } \mathtt{dt\_sq\_flat} \in \mathbb{R}^{N_\text{pos}}$$
 
 ### 4.3 Base kernel generation (MLP)
 
-A two-layer MLP with GELU activation maps the 6-dimensional feature vector to a
-kernel weight for each of the $C$ channels:
+A two-layer MLP with GELU activation maps each 6-dimensional feature vector to a
+weight for each of the $C$ channels:
 
-$$\mathbf{k}_\text{base}(\mathbf{f}) = \text{Linear}_{h \to C}\!\left(\text{GELU}\!\left(\text{Linear}_{6 \to h}(\mathbf{f})\right)\right)
-\in \mathbb{R}^C$$
+$$\mathbf{k}_\text{base}(\mathbf{f}) =
+W_2^{(k)}\,\text{GELU}\!\bigl(W_1^{(k)}\,\mathbf{f} + b_1^{(k)}\bigr) + b_2^{(k)}
+\;\in\; \mathbb{R}^C$$
 
-This produces a tensor of shape $[N_\text{pos}, C]$ where
-$N_\text{pos} = K_t K_z K_h K_w$ is the total number of kernel positions.  The
-MLP is shared across all kernel positions; each position is distinguished solely
-by its feature vector $\mathbf{f}$.
+where $W_1^{(k)} \in \mathbb{R}^{h \times 6}$, $W_2^{(k)} \in \mathbb{R}^{C \times h}$,
+and $h$ is `hidden_dim`.
 
-### 4.4 Learnable anisotropic decay
+Applied to all $N_\text{pos}$ positions simultaneously:
 
-The MLP alone cannot guarantee that the kernel decays to zero at large offsets.
-A **learnable anisotropic decay mask** is multiplied elementwise:
+$$K_\text{base} = \text{MLP}(\mathbf{F}) \in \mathbb{R}^{N_\text{pos} \times C}$$
 
-$$d(\Delta t, \Delta z, \Delta y, \Delta x)
-= \exp\!\bigl(-\alpha_s \cdot r_{3d} - \alpha_t \cdot t_\text{phys}\bigr)$$
+where $\mathbf{F} \in \mathbb{R}^{N_\text{pos} \times 6}$ is the stacked feature matrix.
 
-The two scalar rates $\alpha_s, \alpha_t \geq 0$ are learned parameters stored
-in log-space and mapped via softplus to ensure non-negativity:
+### 4.4 Learnable anisotropic Gaussian decay
 
-$$\alpha_s = \text{softplus}(\log\alpha_s), \qquad \alpha_t = \text{softplus}(\log\alpha_t)$$
+A **learnable Gaussian decay mask** is multiplied element-wise into the base kernel
+to enforce locality.  The formula, in terms of true physical distances, is:
 
-**Interpretation**: $\alpha_s$ controls how quickly the filter loses sensitivity
-to voxels farther away in 3D space (in mm); $\alpha_t$ controls temporal
-sensitivity decay (in seconds).  A large $\alpha_s$ means the filter is a
-sharp local spatial operator; a small $\alpha_s$ allows long-range spatial
-mixing.  These two rates are learned separately, reflecting the fact that BOLD
-signal correlations decay differently in space and time.
+$$d(\Delta t, \Delta z, \Delta y, \Delta x) =
+\exp\!\Bigl(-\alpha\,\bigl[(\delta X)^2 + (\delta Y)^2 + (\delta Z)^2\bigr]
+            -\beta\,(\delta T)^2\Bigr)$$
 
-The final kernel weight at position $(\Delta t, \Delta z, \Delta y, \Delta x)$
-for channel $c$ is:
+$$= \exp\!\bigl(-\alpha\; r^2_{3d} - \beta\; (\delta T)^2\bigr)$$
 
-$$k_c(\Delta t, \Delta z, \Delta y, \Delta x)
-= k_\text{base,c}(\mathbf{f}) \cdot \exp(-\alpha_s r_{3d} - \alpha_t t_\text{phys})$$
+where:
+- $r^2_{3d} = (\delta X)^2 + (\delta Y)^2 + (\delta Z)^2$ with
+  $\delta X = \Delta x \cdot s_x$, etc. — **true spatial squared distance in mm$^2$**,
+- $(\delta T)^2 = (|\Delta t| \cdot \Delta T)^2$ — **true temporal squared distance in
+  s$^2$**,
+- $\alpha \geq 0$ — spatial Gaussian decay rate $[\text{mm}^{-2}]$,
+- $\beta \geq 0$ — temporal Gaussian decay rate $[\text{s}^{-2}]$.
+
+The scalar rates are learned parameters stored in log-space and constrained to be
+non-negative via softplus:
+
+$$\alpha = \text{softplus}(\log\tilde{\alpha}), \qquad
+  \beta  = \text{softplus}(\log\tilde{\beta})$$
+
+where $\log\tilde{\alpha}$ and $\log\tilde{\beta}$ are the actual `nn.Parameter`
+objects (initialised to 0, so $\alpha = \beta = \ln 2$ at init).
+
+**Physical interpretation:**
+- A Gaussian decay with rate $\alpha$ is equivalent to a Gaussian kernel with
+  standard deviation $\sigma_s = 1/\sqrt{2\alpha}$ mm.  Large $\alpha$ means the
+  filter is sharply local in space.
+- Similarly, $\sigma_t = 1/\sqrt{2\beta}$ seconds sets the temporal locality scale.
+- Unlike the previous linear-decay formula $e^{-\alpha_s r_{3d} - \alpha_t |\delta T|}$
+  (Laplacian), the Gaussian decay $e^{-\alpha r^2_{3d} - \beta (\delta T)^2}$ is
+  differentiable at the origin and has faster tail decay, providing a stronger
+  locality prior.
+
+The decay mask has shape $[N_\text{pos}]$ and is computed in `forward()` at each
+call so that gradient flow through $\alpha, \beta$ is preserved.
+
+The final kernel weight for channel $c$ at position
+$(\Delta t, \Delta z, \Delta y, \Delta x)$ is:
+
+$$k_c(\Delta t, \Delta z, \Delta y, \Delta x) =
+k_{\text{base},c}(\mathbf{f}) \cdot \exp\!\bigl(-\alpha\; r^2_{3d} - \beta\; (\delta T)^2\bigr)$$
+
+In matrix form:
+
+$$K = K_\text{base} \odot d\,\mathbf{1}^\top \in \mathbb{R}^{N_\text{pos} \times C}$$
+
+where $d \in \mathbb{R}^{N_\text{pos}}$ is the decay vector and $\odot$ denotes
+broadcasting.
 
 ### 4.5 Depthwise Conv3d execution (T×Z merging)
 
-A true 4D convolution is expensive.  The Hyena4D filter avoids it by **merging
-the $T$ and $Z$ axes** into a single depth dimension:
+A true 6D convolution over $[B, C, T, Z, H, W]$ is not natively available in PyTorch.
+Instead, the $T$ and $Z$ axes are merged into a single depth axis:
 
-$$D = T \times Z, \qquad K_D = K_t \times K_z$$
+$$D = T \cdot Z, \qquad K_D = K_t \cdot K_z$$
 
-The input tensor is reshaped:
+**Input reshape:**
+$$[B,\; C,\; T,\; Z,\; H,\; W] \;\xrightarrow{\text{view}}\; [B,\; C,\; D,\; H,\; W]$$
 
-$$[B,\; C,\; T,\; Z,\; H,\; W] \;\longrightarrow\; [B,\; C,\; D,\; H,\; W]$$
+**Kernel reshape:** the kernel matrix $K \in \mathbb{R}^{N_\text{pos} \times C}$ is
+transposed and reshaped:
 
-The kernel is reshaped to $[C,\; 1,\; K_D,\; K_h,\; K_w]$ and applied as a
-standard PyTorch `F.conv3d` with `groups=C` (depthwise: each channel has its
-own kernel, no cross-channel mixing here).
+$$K^\top \in \mathbb{R}^{C \times N_\text{pos}}
+\;\xrightarrow{\text{view}}\;
+\mathbb{R}^{C \times 1 \times K_D \times K_h \times K_w}$$
 
-**Why this is valid**: the spatial-radial symmetry of the kernel already treats
-$(\Delta z)$ and $(\Delta y, \Delta x)$ symmetrically within the 3D spatial
-part.  Merging $T$ and $Z$ is an approximation that treats temporal position and
-slice position uniformly along the depth axis — the kernel still has separate
-decay rates for $t_\text{phys}$ and $r_{3d}$, but within the Conv3d call they
-share the same `D` axis.  The primary computational benefit is that PyTorch's
-highly-optimised 3D conv handles this case efficiently.
+**Depthwise convolution** with `groups=C`:
 
-After the convolution, the output is reshaped back:
+$$\mathbf{Y}_{3d} = \text{Conv3d}\!\left(\mathbf{X}_{3d},\; K_\text{dw},\;
+  \text{padding}=\left(\tfrac{K_D}{2},\, \tfrac{K_h}{2},\, \tfrac{K_w}{2}\right),\;
+  \text{groups}=C\right)
+\;\in\; \mathbb{R}^{B \times C \times D \times H \times W}$$
 
-$$[B,\; C,\; D,\; H,\; W] \;\longrightarrow\; [B,\; C,\; T,\; Z,\; H,\; W]$$
+Each channel $c$ is convolved with its own kernel slice $K_\text{dw}[c, 0, :, :, :]$,
+with no cross-channel mixing (that role belongs to the FFN in the PixelBlock).
+
+**Output reshape:**
+$$[B,\; C,\; D,\; H,\; W] \;\xrightarrow{\text{view}}\; [B,\; C,\; T,\; Z,\; H,\; W]$$
 
 ---
 
 ## 5. Hyena4DPixelBlock
 
-### 5.1 Structure
+### 5.1 Block structure
 
-Each block follows the **MetaFormer** pattern: two sequential sub-blocks with
-pre-norm and residual connections.
+Each block follows the MetaFormer pattern with two sub-blocks, each using pre-norm
+and a residual connection.  Let $\mathbf{x} \in \mathbb{R}^{B \times C \times T \times Z \times H \times W}$:
 
-```
-input x  [B, C, T, Z, H, W]
-  │
-  ├─ LN(x) → Hyena4DFilter → + x   (token mixing sub-block)
-  │
-  └─ LN(x) → channel MLP   → + x   (channel mixing sub-block)
-```
+$$\mathbf{x} \leftarrow \mathbf{x} + \text{Hyena4DFilter}\!\bigl(\text{LN}(\mathbf{x})\bigr)$$
 
-### 5.2 LayerNorm placement
+$$\mathbf{x} \leftarrow \mathbf{x} + \text{FFN}\!\bigl(\text{LN}(\mathbf{x})\bigr)$$
 
-Standard LayerNorm normalises over the *channel* dimension.  Here the input is
-$[B, C, T, Z, H, W]$ so the spatial/temporal axes are permuted to the last
-position before applying `nn.LayerNorm(C)`, then permuted back:
+### 5.2 LayerNorm over the channel dimension
+
+`nn.LayerNorm(C)` normalises a vector of length $C$.  Because the input layout is
+$[B, C, T, Z, H, W]$ (channel-first), the axes must be permuted before applying LN:
 
 $$[B,\;C,\;T,\;Z,\;H,\;W]
-\;\xrightarrow{\text{permute}}\;
-[B,\;T,\;Z,\;H,\;W,\;C]
-\;\xrightarrow{\text{LN}}\;
-\;\xrightarrow{\text{permute}}\;
+\;\xrightarrow{\text{permute}(0,2,3,4,5,1)}\;
+[B,\;T,\;Z,\;H,\;W,\;C]$$
+
+Apply $\text{LN}$ along the last axis $C$:
+
+$$\text{LN}(\mathbf{h}) = \frac{\mathbf{h} - \mu_\mathbf{h}}{\sigma_\mathbf{h} + \epsilon} \odot \gamma + \beta_\text{LN}$$
+
+where $\mu_\mathbf{h}, \sigma_\mathbf{h}$ are the mean and standard deviation over
+the $C$ elements of position $\mathbf{h}$, and $\gamma, \beta_\text{LN} \in \mathbb{R}^C$
+are learned affine parameters.  Then permute back:
+
+$$[B,\;T,\;Z,\;H,\;W,\;C]
+\;\xrightarrow{\text{permute}(0,5,1,2,3,4)}\;
 [B,\;C,\;T,\;Z,\;H,\;W]$$
 
 This normalises each spatial/temporal position's channel vector independently.
 
-### 5.3 Channel MLP (FFN)
+### 5.3 Channel FFN (Feed-Forward Network)
 
-A two-layer MLP with GELU and dropout, applied identically to every
-spatiotemporal position:
+A two-layer MLP with GELU activation and optional dropout is applied identically
+to every spatiotemporal position.  Let $\mathbf{h} \in \mathbb{R}^C$ be one position:
 
-$$\text{FFN}(\mathbf{h}) = W_2 \cdot \text{GELU}(W_1 \mathbf{h} + b_1) + b_2$$
+$$\text{FFN}(\mathbf{h}) =
+  W_4\,\text{Drop}\!\left(\text{GELU}\!\left(W_3\,\mathbf{h} + b_3\right)\right) + b_4$$
 
-Hidden dimension is $4C$ by default (`mlp_ratio=4`).  The MLP operates on the
-$[B \cdot T \cdot Z \cdot H \cdot W,\; C]$ flattened view for efficiency, then
-is reshaped back.
+where $W_3 \in \mathbb{R}^{d_\text{ff} \times C}$, $W_4 \in \mathbb{R}^{C \times d_\text{ff}}$,
+$d_\text{ff} = \lfloor C \cdot r \rfloor$ with expansion ratio $r$ (`mlp_ratio`, default 4).
 
-### 5.4 Role of residual connections
+For efficiency, the positions are flattened before applying the linear layers:
 
-Residuals preserve gradient flow across many blocks and ensure the filter output
-is added to rather than replacing the input representation.  This allows shallow
-blocks to act as near-identity operations early in training and gradually
-specialise as training proceeds.
+$$[B,\;C,\;T,\;Z,\;H,\;W]
+\;\xrightarrow{\text{permute},\,\text{reshape}}\;
+[B T Z H W,\; C]
+\;\xrightarrow{\text{FFN}}\;
+[B T Z H W,\; C]
+\;\xrightarrow{\text{view},\,\text{permute}}\;
+[B,\;C,\;T,\;Z,\;H,\;W]$$
+
+### 5.4 Residual connections
+
+Both sub-blocks use pre-norm residuals:
+
+$$\mathbf{x}^{(l+1/2)} = \mathbf{x}^{(l)} + \text{Mixer}\!\bigl(\text{LN}(\mathbf{x}^{(l)})\bigr)$$
+
+$$\mathbf{x}^{(l+1)} = \mathbf{x}^{(l+1/2)} + \text{FFN}\!\bigl(\text{LN}(\mathbf{x}^{(l+1/2)})\bigr)$$
 
 ---
 
 ## 6. Hyena4DBackbone — Full Encoder
 
-### 6.1 Channel projection
+### 6.1 Channel projection ($1\times 1 \times 1$ Conv3d)
 
-The first operation after receiving the RPE output $[B, C_\text{in}, T_p, Z_p,
-H_p, W_p]$ is a $1 \times 1 \times 1$ Conv3d (applied over the merged $D_p =
-T_p \times Z_p$ axis) that projects $C_\text{in} \to d_\text{model}$
-(= `embed_dim`).  This decouples the RPE output dimension from the backbone
-width.
+The RPE output $[B,\; d_\text{out},\; T_p,\; Z_p,\; H_p,\; W_p]$ is first reshaped
+to merge $T_p$ and $Z_p$:
 
-### 6.2 Stacked blocks
+$$[B,\; d_\text{out},\; T_p,\; Z_p,\; H_p,\; W_p]
+\;\xrightarrow{\text{view}}\;
+[B,\; d_\text{out},\; D_p,\; H_p,\; W_p], \quad D_p = T_p \cdot Z_p$$
 
-The projected tensor passes through `num_blocks` Hyena4DPixelBlocks in sequence.
-Each block:
-- mixes information across spatiotemporal positions via Hyena4DFilter,
-- mixes information across channels via the FFN.
+A $1\times1\times1$ convolution projects $d_\text{out} \to d_\text{model}$:
 
-Typical configuration: `num_blocks=4`, `embed_dim=64`.
+$$\mathbf{X}_\text{proj} = W_\text{proj} * \mathbf{X}_{3d}
+\;\in\; \mathbb{R}^{B \times d_\text{model} \times D_p \times H_p \times W_p}$$
+
+where $W_\text{proj} \in \mathbb{R}^{d_\text{model} \times d_\text{out} \times 1 \times 1 \times 1}$.
+This is reshaped back to $[B,\; d_\text{model},\; T_p,\; Z_p,\; H_p,\; W_p]$.
+
+### 6.2 Stacked Hyena4DPixelBlocks
+
+The tensor passes through $L$ blocks in sequence ($L =$ `num_blocks`):
+
+$$\mathbf{x}^{(0)} = \mathbf{X}_\text{proj}$$
+
+$$\mathbf{x}^{(l+1)} = \text{Hyena4DPixelBlock}_l\!\left(\mathbf{x}^{(l)}\right),
+\quad l = 0,\ldots,L-1$$
+
+Each block maintains the shape $[B,\; d_\text{model},\; T_p,\; Z_p,\; H_p,\; W_p]$.
 
 ### 6.3 Global mean pooling
 
-After the last block, the feature map $[B, C, T, Z, H, W]$ is reduced to a
-fixed-size vector by averaging over all spatiotemporal positions:
+After the last block, the feature map is reduced to a fixed-size vector by averaging
+over all spatiotemporal positions:
 
-$$\mathbf{h} = \frac{1}{T \cdot Z \cdot H \cdot W}
-\sum_{t,z,h,w} \mathbf{f}_{t,z,h,w} \in \mathbb{R}^{d_\text{model}}$$
+$$\mathbf{h} = \frac{1}{T_p Z_p H_p W_p}
+\sum_{t=0}^{T_p-1}\sum_{z=0}^{Z_p-1}\sum_{h=0}^{H_p-1}\sum_{w=0}^{W_p-1}
+\mathbf{x}^{(L)}_{:,\,t,z,h,w}
+\;\in\; \mathbb{R}^{B \times d_\text{model}}$$
 
-**Rotation invariance**: because the Hyena4DFilter is radially symmetric in the
-$(z, y, x)$ axes (§4.2), applying it to a spatially rotated input produces a
-rotated feature map.  The global mean pool collapses this rotation-equivariant
-feature map to a single vector that is invariant to the rotation.
-Formally, for any rotation $R \in SO(3)$:
-
-$$\text{MeanPool}(f(R \cdot \mathbf{x})) = \text{MeanPool}(R \cdot f(\mathbf{x}))
-= \text{MeanPool}(f(\mathbf{x}))$$
-
-where the second equality holds because mean pooling commutes with permutations
-(which rotations induce on a discrete grid).
+Implemented as `.mean(dim=[2,3,4,5])` over the last four axes.
 
 ---
 
@@ -375,173 +464,184 @@ where the second equality holds because mean pooling commutes with permutations
 
 ### 7.1 Architecture
 
-The backbone features $\mathbf{h} \in \mathbb{R}^{d_\text{model}}$ are mapped to
-an embedding $\mathbf{z} \in \mathbb{R}^{d_\text{proj}}$ by:
+The backbone features $\mathbf{h} \in \mathbb{R}^{B \times d_\text{model}}$ are
+mapped to embeddings $\mathbf{z} \in \mathbb{R}^{B \times d_\text{proj}}$ by:
 
-$$\mathbf{z} = \text{Linear}_{d_\text{model} \to d_\text{proj}}\!\left(
-  \text{GELU}\!\left(
-    \text{Linear}_{d_\text{model} \to d_\text{model}}\!\left(
-      \text{LayerNorm}(\mathbf{h})
-    \right)
-  \right)
-\right)$$
+$$\mathbf{h}' = \text{LN}(\mathbf{h}), \quad \mathbf{h}' \in \mathbb{R}^{d_\text{model}}$$
+
+$$\mathbf{u} = W_b\,\mathbf{h}' + b_b, \quad W_b \in \mathbb{R}^{d_\text{model} \times d_\text{model}}$$
+
+$$\mathbf{z} = W_c\,\text{GELU}(\mathbf{u}) + b_c, \quad W_c \in \mathbb{R}^{d_\text{proj} \times d_\text{model}}$$
+
+Tensor shape at each step: $[B, d_\text{model}] \to [B, d_\text{model}] \to [B, d_\text{proj}]$.
 
 ### 7.2 L2 normalisation
 
-The output is projected onto the unit hypersphere:
+The projection is normalised onto the unit hypersphere:
 
-$$\hat{\mathbf{z}} = \frac{\mathbf{z}}{\|\mathbf{z}\|_2}$$
+$$\hat{\mathbf{z}}_i = \frac{\mathbf{z}_i}{\|\mathbf{z}_i\|_2}, \quad
+\hat{\mathbf{z}}_i \in \mathbb{R}^{d_\text{proj}}, \quad
+\|\hat{\mathbf{z}}_i\|_2 = 1$$
 
-L2 normalisation ensures that cosine similarity between two embeddings equals
-their dot product, which simplifies the contrastive loss and makes embedding
-magnitudes uninformative (only direction carries information).
+After normalisation, the cosine similarity between any two embeddings equals their
+dot product: $\cos(\hat{\mathbf{z}}_i, \hat{\mathbf{z}}_j) = \hat{\mathbf{z}}_i \cdot \hat{\mathbf{z}}_j$.
 
 ---
 
 ## 8. Contrastive Loss (InfoNCE, subject-level)
 
-### 8.1 Motivation
+### 8.1 Similarity matrix
 
-The contrastive loss teaches the encoder to produce embeddings such that
-subsequences from the *same* subject cluster together on the unit sphere and
-those from *different* subjects are spread apart.  This is a form of
-self-supervised learning: subject identity is automatically available from the
-filename without any manual annotation.
+For a batch of $B$ L2-normalised embeddings
+$\hat{\mathbf{z}}_1,\ldots,\hat{\mathbf{z}}_B \in \mathbb{R}^{d_\text{proj}}$,
+form the scaled cosine-similarity matrix:
 
-### 8.2 Similarity matrix
+$$S_{ij} = \frac{\hat{\mathbf{z}}_i \cdot \hat{\mathbf{z}}_j}{\tau},
+\quad S \in \mathbb{R}^{B \times B}$$
 
-For a batch of $B$ subsequence embeddings $\hat{\mathbf{z}}_1, \ldots,
-\hat{\mathbf{z}}_B \in \mathbb{R}^{d_\text{proj}}$ (each L2-normalised), compute
-the pairwise similarity matrix:
+where $\tau$ is the temperature (default $\tau = 0.1$).
 
-$$S_{ij} = \frac{\hat{\mathbf{z}}_i \cdot \hat{\mathbf{z}}_j}{\tau}$$
+### 8.2 Positive and negative masks
 
-where $\tau$ is the temperature hyperparameter (default 0.1).  Because all
-embeddings are unit-normalised, $\hat{\mathbf{z}}_i \cdot \hat{\mathbf{z}}_j$
-is the cosine similarity.
+Let $\text{id}_i$ denote the subject ID of sample $i$.  Define:
 
-### 8.3 Positive and negative masks
+$$\text{pos\_mask}_{ij} =
+\begin{cases}
+1 & \text{if } \text{id}_i = \text{id}_j \text{ and } i \neq j \\
+0 & \text{otherwise}
+\end{cases}$$
 
-For each anchor $i$, define:
-- **positive set** $\mathcal{P}_i$: all $j \neq i$ with the same subject ID,
-- **negative set**: all $j \neq i$ with a different subject ID.
+$$\text{logits\_mask}_{ij} = \mathbf{1}[i \neq j]$$
 
-The diagonal ($j = i$, self-similarity) is excluded from both sets.
+The diagonal ($i = j$, self-similarity) is excluded from all computations.
 
-### 8.4 InfoNCE loss
+### 8.3 InfoNCE loss with numerical stabilisation
 
-For each anchor $i$ that has at least one positive:
+For each sample $i$, subtract the row maximum for numerical stability
+(log-sum-exp trick):
 
-$$\ell_i = -\frac{1}{|\mathcal{P}_i|} \sum_{j \in \mathcal{P}_i}
-\left[S_{ij} - \log\sum_{k \neq i} e^{S_{ik}}\right]$$
+$$\tilde{S}_{ij} = S_{ij} - \max_{k \neq i} S_{ik}$$
 
-The final loss averages over all valid anchors (those with at least one
-positive in the batch):
+Compute log-probabilities over all non-self entries:
 
-$$\mathcal{L} = \frac{1}{|\{i : |\mathcal{P}_i| > 0\}|}
-\sum_{i : |\mathcal{P}_i| > 0} \ell_i$$
+$$\log p_{ij} = \tilde{S}_{ij} - \log\!\left(\sum_{k \neq i} e^{\tilde{S}_{ik}} + \epsilon\right)$$
 
-**Numerical stability**: before computing $e^{S_{ij}}$, the row maximum is
-subtracted from all similarities (log-sum-exp trick):
+where $\epsilon = 10^{-12}$ prevents $\log 0$.  For each anchor $i$ with at least one
+positive ($|\mathcal{P}_i| > 0$), the per-anchor loss is the average negative
+log-probability over positives:
 
-$$\tilde{S}_{ij} = S_{ij} - \max_k S_{ik}$$
+$$\ell_i = -\frac{1}{|\mathcal{P}_i|}
+\sum_{j \in \mathcal{P}_i} \log p_{ij}$$
 
-### 8.5 Temperature interpretation
+The batch loss averages over valid anchors:
 
-- **Low $\tau$** (e.g. 0.05): sharp peaks — the loss strongly penalises any
-  mismatch; hard negatives dominate.
-- **High $\tau$** (e.g. 0.5): soft peaks — more uniform gradients; easier to
-  train early on.
+$$\mathcal{L} = \frac{1}{\sum_i \mathbf{1}[|\mathcal{P}_i| > 0]}
+\sum_{i:\,|\mathcal{P}_i|>0} \ell_i$$
 
-A value of $\tau = 0.1$ is a standard default for contrastive pre-training.
+If no anchor has a positive (all $B$ samples are from different subjects),
+the loss is defined as $0$.
+
+### 8.4 Temperature interpretation
+
+$$\tau \to 0: \text{ sharper peaks, harder negatives, larger gradients}$$
+$$\tau \to \infty: \text{ uniform distribution, vanishing gradients}$$
+
+A value of $\tau = 0.1$ is a standard default for self-supervised contrastive
+pre-training.
 
 ---
 
 ## 9. Training Loop
 
-### 9.1 Model structure during training
+### 9.1 Full-pipeline forward pass
 
-`Hyena4DFullPipeline` wraps both the RPE and the encoder into a single
-`nn.Module`.  During the forward pass, the RPE is run **one sample at a time**
-(a Python loop over the batch dimension) so that peak memory is bounded to one
-raw fMRI volume at a time.  After all RPE calls, the resulting embeddings are
-concatenated into a batch and fed to the encoder together.
+`Hyena4DFullPipeline` wraps the RPE and the encoder.  Because a raw fMRI volume is
+large, the RPE is run one sample at a time:
 
-```
-[B, H, W, Z, T]
-  for i in range(B):
-      xi = [1, 1, H, W, Z, T]
-      ei = RPE(xi)             → [1, proj, H_p, W_p, Z_p, T_p]
-      ei = permute(ei)         → [1, proj, T_p, Z_p, H_p, W_p]
-  cat → [B, proj, T_p, Z_p, H_p, W_p]
-  encoder → [B, projection_dim]
-```
+$$\text{for } b = 0, \ldots, B-1:$$
+$$\quad \mathbf{x}_b \in \mathbb{R}^{1 \times C \times H \times W \times Z \times T_\text{sub}}$$
+$$\quad \mathbf{e}_b = \text{RPE}(\mathbf{x}_b) \in \mathbb{R}^{1 \times d_\text{out} \times H_p \times W_p \times Z_p \times T_p}$$
+$$\quad \mathbf{e}_b = \text{permute}(\mathbf{e}_b) \in \mathbb{R}^{1 \times d_\text{out} \times T_p \times Z_p \times H_p \times W_p}$$
+
+$$\mathbf{E} = \text{cat}(\mathbf{e}_0,\ldots,\mathbf{e}_{B-1},\;\dim=0)
+\in \mathbb{R}^{B \times d_\text{out} \times T_p \times Z_p \times H_p \times W_p}$$
+
+$$\hat{\mathbf{Z}} = \text{Encoder}(\mathbf{E})
+\in \mathbb{R}^{B \times d_\text{proj}}$$
+
+$$\mathcal{L} = \text{InfoNCE}(\hat{\mathbf{Z}},\; \text{subject\_ids})$$
 
 ### 9.2 Optimiser
 
-Adam with a fixed learning rate (default $10^{-3}$).  All parameters of both
-RPE and encoder are jointly optimised.
+Adam with fixed learning rate $\eta = 10^{-3}$.  All parameters of RPE and encoder
+are jointly optimised.
 
 ### 9.3 Checkpointing
 
-A numbered checkpoint (`checkpoint_epoch{N:03d}.pt`) is saved every
-`--save-every` epochs.  `best_model.pt` is always overwritten when a new
-lowest-loss epoch is reached.  Checkpoints store:
-- `model_state_dict` — full pipeline weights (RPE + encoder),
-- `optimizer_state_dict` — Adam state for exact resumption,
-- `epoch` and `loss`.
+A numbered checkpoint is saved every `--save-every` epochs.  `best_model.pt` is
+overwritten whenever the epoch loss is the lowest seen so far.  Each checkpoint
+contains `model_state_dict`, `optimizer_state_dict`, `epoch`, and `loss`.
 
 ---
 
-## 10. Subject-Level Embedding Extraction (Post-Training)
+## 10. Subject-Level Embedding Extraction
 
-After training, the encoder is run on all subsequences of the training (or
-target) dataset with `torch.inference_mode()`.  For each subject $s$:
+After training, run inference with `torch.inference_mode()`.  For each subject $s$
+with $N_s$ subsequences, the subject embedding is the mean over all subsequence
+embeddings:
 
-$$\mathbf{e}_s = \frac{1}{N_s} \sum_{k=1}^{N_s} \hat{\mathbf{z}}_{s,k}$$
+$$\mathbf{e}_s = \frac{1}{N_s} \sum_{k=1}^{N_s} \hat{\mathbf{z}}_{s,k}
+\;\in\; \mathbb{R}^{d_\text{proj}}$$
 
-where $\hat{\mathbf{z}}_{s,k}$ is the embedding of the $k$-th subsequence of
-subject $s$.
+This mean is taken over **L2-normalised** embeddings, so $\mathbf{e}_s$ is not
+necessarily unit-norm.  For downstream cosine-similarity comparisons, normalise:
 
-**Note**: the mean is computed on the **raw projection head outputs** (before
-re-normalising the mean), so $\mathbf{e}_s$ is typically close to but not
-exactly on the unit sphere.  For cosine-similarity comparisons downstream,
-normalise $\mathbf{e}_s$ again.
+$$\hat{\mathbf{e}}_s = \frac{\mathbf{e}_s}{\|\mathbf{e}_s\|_2}$$
 
-The result is a matrix of shape $[N_\text{subjects},\; d_\text{proj}]$ saved
-to `subject_embeddings.pt`.
+The result matrix has shape $[N_\text{subjects},\; d_\text{proj}]$ and is saved to
+`subject_embeddings.pt`.
 
 ---
 
 ## 11. Summary of Trainable Parameters
 
-For the default configuration (`embed_dim=64`, `num_blocks=4`,
-`projection_dim=128`, `kernel_size=(3,3,3,3)`, `rpe_hidden=64`,
-`patch_size=(8,8,4,10)`):
+For the default configuration
+(`embed_dim=64`, `num_blocks=4`, `projection_dim=128`,
+`kernel_size=(3,3,3,3)`, `rpe_hidden=64`, `patch_size=(8,8,4,10)`):
 
-| Module | Description | Parameters |
+| Module | Formula | Parameters |
 |---|---|---|
-| RPE `φ` MLP | `Linear(1→64) + GELU + Linear(64→64)` | 4,224 |
-| RPE `ρ` linear | `Linear(64→128)` | 8,320 |
-| Channel projection | `Conv3d(128→64, 1×1×1)` | 8,256 |
-| Each Hyena4DPixelBlock | Filter MLP + decay (2) + norm (2) + FFN | ~47,000 |
-| 4 blocks total | | ~188,000 |
-| Projection head | `LN + Linear(64→64) + GELU + Linear(64→128)` | 12,800 |
-| **Total** | | **~222,000** |
+| RPE $\phi$: Linear(1→64) | $64 \cdot 1 + 64$ | 128 |
+| RPE $\phi$: Linear(64→64) | $64 \cdot 64 + 64$ | 4,160 |
+| RPE $\rho$: Linear(64→128) | $128 \cdot 64 + 128$ | 8,320 |
+| Channel projection Conv3d(128→64, 1×1×1) | $64 \cdot 128 + 64$ | 8,256 |
+| Each block: Filter MLP Linear(6→64) | $64 \cdot 6 + 64$ | 448 |
+| Each block: Filter MLP Linear(64→64) | $64 \cdot 64 + 64$ | 4,160 |
+| Each block: $\log\tilde{\alpha}, \log\tilde{\beta}$ | 2 scalars | 2 |
+| Each block: LN1, LN2 ($\gamma, \beta$, dim=64) | $2 \times 2 \times 64$ | 256 |
+| Each block: FFN Linear(64→256) | $256 \cdot 64 + 256$ | 16,640 |
+| Each block: FFN Linear(256→64) | $64 \cdot 256 + 64$ | 16,448 |
+| Each block total | | ~37,954 |
+| 4 blocks | | ~151,816 |
+| Projection head LN | $2 \times 64$ | 128 |
+| Projection head Linear(64→64) | $64 \cdot 64 + 64$ | 4,160 |
+| Projection head Linear(64→128) | $128 \cdot 64 + 128$ | 8,320 |
+| **Total** | | **~185,288** |
 
-The exact count depends on configuration.  Run
-`sum(p.numel() for p in model.parameters() if p.requires_grad)` to confirm.
+Run `sum(p.numel() for p in model.parameters() if p.requires_grad)` to get the
+exact count for your configuration.
 
 ---
 
 ## 12. Design Trade-offs and Limitations
 
-| Aspect | Current Choice | Trade-off |
+| Aspect | Current choice | Trade-off |
 |---|---|---|
-| **RPE patch grid** | Fixed axis-aligned | Breaks rotation invariance; computationally cheap |
-| **T×Z axis merging** | Conv3d over merged D=T×Z | Efficient; treats (Δt,Δz) depth uniformly |
-| **Time ≠ 4th spatial dim** | Separate α_s, α_t decay rates | Biologically motivated; not purely symmetric |
-| **Simultaneous slice assumption** | `t_abs = \|Δt\|·T_gap` | All slices treated as acquired at the same time within a TR |
-| **Contrastive positive definition** | Same subject = positive | No within-subject structure; assumes intra-subject similarity |
-| **Global mean pool** | Averages over all positions | Throws away spatial layout; needed for rotation invariance |
-| **No fine-tuning step** | Pre-train → direct embedding | Suitable for unsupervised downstream analysis |
+| **Gaussian vs Laplacian decay** | $\exp(-\alpha r^2_{3d} - \beta (\delta T)^2)$ | Differentiable at origin, faster tail decay, physically motivated (RBF); Laplacian has heavier tails |
+| **RPE patch grid** | Fixed axis-aligned grid | Breaks rotation equivariance; computationally cheap and standard for fMRI |
+| **T×Z axis merging** | Conv3d over $D = T \cdot Z$ | Efficient; treats (Δt,Δz) along the same depth axis — kernel decay rates still separate $r^2_{3d}$ and $(\delta T)^2$ |
+| **Simultaneous slice assumption** | $\delta T = \|\Delta t\| \cdot \Delta T$ | All slices treated as acquired within the same TR; no slice-timing correction |
+| **Rotation invariance** | Radially symmetric kernel + global mean pool | Spatial layout discarded; invariance achieved at the cost of spatial structure in the embedding |
+| **Contrastive positive definition** | Same subject ID = positive | No within-subject temporal structure exploited; assumes intra-subject similarity |
+| **Global mean pool** | Averages over all $T_p Z_p H_p W_p$ positions | Throws away spatial layout; enables permutation/rotation invariance at the embedding level |
+| **No fine-tuning** | Pre-train → direct embedding | Suitable for unsupervised downstream analysis; may be suboptimal for supervised tasks |

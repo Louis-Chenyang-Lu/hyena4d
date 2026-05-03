@@ -20,8 +20,15 @@ def make_4d_positional_features(
     Rotation invariance in the 3D spatial axes (z, y, x) means kernel values must
     depend only on scalars that are invariant under SO(3) rotations of (z, y, x).
 
-    Temporal distance uses the volume TR only (all slices assumed simultaneous):
-        t_abs = |Δt| * t_gap
+    Physical distances (true distances accounting for resolution):
+        deltaX_phys = patch_offset_x * patch_size_x * sx   [mm]
+        deltaY_phys = patch_offset_y * patch_size_y * sy   [mm]
+        deltaZ_phys = patch_offset_z * patch_size_z * sz   [mm]
+        deltaT_phys = patch_offset_t * patch_size_t * t_gap  [seconds]
+
+    Within the kernel grid these simplify to:
+        deltaX_phys = X * sx,  deltaY_phys = Y * sy,  deltaZ_phys = Z * sz
+        deltaT_phys = T * t_gap  (all slices assumed simultaneous, so |deltaT| used)
 
     Args:
         kernel_size : (Kt, Kz, Kh, Kw)
@@ -57,20 +64,22 @@ def make_4d_positional_features(
         t_coords, z_coords, y_coords, x_coords, indexing="ij"
     )  # [Kt, Kz, Kh, Kw]
 
-    # Physical temporal distance: |Δt| * t_gap  (all slices assumed simultaneous)
-    t_abs = T.abs() * tg   # physical seconds
-
-    # --- Spatial distances in physical mm ---
-    Zp = Z * sz
-    Yp = Y * sy
-    Xp = X * sx
+    # True physical distances (considering resolution):
+    #   deltaT_phys = |deltaT_index| * t_gap  [seconds]
+    #   deltaZ_phys = deltaZ_index  * sz       [mm]
+    #   deltaY_phys = deltaY_index  * sy       [mm]
+    #   deltaX_phys = deltaX_index  * sx       [mm]
+    t_abs = T.abs() * tg   # physical seconds (|deltaT_phys|)
+    Zp = Z * sz            # physical mm
+    Yp = Y * sy            # physical mm
+    Xp = X * sx            # physical mm
 
     # --- Rotation-invariant scalars (in physical units) ---
     r_3d  = torch.sqrt(Zp**2 + Yp**2 + Xp**2)               # physical mm
     r_4d  = torch.sqrt(t_abs**2 + Zp**2 + Yp**2 + Xp**2)    # mixed physical units
 
     # Closed-form decays — these are the "built-in" non-learnable priors.
-    # Learnable anisotropic decay is applied separately in Hyena4DFilter.
+    # Learnable Gaussian decay is applied separately in Hyena4DFilter.
     decay_t   = 1.0 / (1.0 + t_abs)    # temporal locality prior
     decay_3d  = 1.0 / (1.0 + r_3d)     # spatial locality prior
     decay_4d  = 1.0 / (1.0 + r_4d)     # isotropic 4D locality prior
@@ -88,19 +97,27 @@ class Hyena4DFilter(nn.Module):
     """
     Parameterizes a depthwise 4D Hyena-style kernel via a small MLP over
     rotation-invariant 4D positional features, plus a learnable anisotropic
-    4D decay that distinguishes the spatial (z,y,x) and temporal (t) axes.
+    Gaussian decay that distinguishes the spatial (z,y,x) and temporal (t) axes.
 
     Kernel generation:
         1. MLP(pos_feats) -> kernel_base  [N_pos, C]   (rotation-invariant by construction)
-        2. decay_mask = exp(-alpha_s * r_3d - alpha_t * |t|)  [N_pos]
-           where alpha_s, alpha_t >= 0 are learned via softplus
+        2. decay_mask = exp(-alpha * (deltaX^2 + deltaY^2 + deltaZ^2) - beta * deltaT^2)
+           where deltaX, deltaY, deltaZ are true physical distances in mm,
+           deltaT is true physical time in seconds (considering scanner resolution),
+           and alpha, beta >= 0 are learned via softplus.
         3. kernel = kernel_base * decay_mask[:, None]
+
+    Physical distances accounting for resolution:
+        deltaX_phys = x_index_offset * sx  (mm),  where sx is voxel size in x
+        deltaY_phys = y_index_offset * sy  (mm),  where sy is voxel size in y
+        deltaZ_phys = z_index_offset * sz  (mm),  where sz is voxel size in z
+        deltaT_phys = t_index_offset * t_gap  (seconds)
 
     Positional features are computed in physical units when voxel_size and
     t_gap are provided (e.g. voxel_size=(0.5, 0.5, 0.5) mm, t_gap=2.0 s).
-    This makes alpha_s and alpha_t physically interpretable across scanners:
-        alpha_s  ~ 1 / correlation length in mm
-        alpha_t  ~ 1 / correlation time in seconds
+    This makes alpha and beta physically interpretable across scanners:
+        alpha  ~ 1 / (2 * spatial_correlation_length^2)  [mm^{-2}]
+        beta   ~ 1 / (2 * temporal_correlation_time^2)   [s^{-2}]
 
     For efficiency, the 4D conv is implemented as a 3D depthwise conv by merging
     the T and Z axes:  D = T * Z,  K_D = K_t * K_z.
@@ -132,11 +149,28 @@ class Hyena4DFilter(nn.Module):
         )  # [N_pos, 6]
         self.register_buffer("pos_feats", pos_feats, persistent=False)
 
-        # Extract the rotation-invariant scalars needed for the learnable decay.
-        # pos_feats columns: [0]=|t|, [1]=r_3d, [2]=r_4d, [3..5]=decays
-        # Store separately so forward() can cast to input dtype without re-computing.
-        self.register_buffer("t_abs_flat", pos_feats[:, 0].clone(), persistent=False)
-        self.register_buffer("r_3d_flat",  pos_feats[:, 1].clone(), persistent=False)
+        # Recompute individual physical displacements for the Gaussian decay.
+        # We need deltaX_phys^2 + deltaY_phys^2 + deltaZ_phys^2 and deltaT_phys^2
+        # separately so the decay is exp(-alpha * r3d_sq - beta * dt_sq).
+        Kt, Kz, Kh, Kw = kernel_size
+        sz, sy, sx = float(voxel_size[0]), float(voxel_size[1]), float(voxel_size[2])
+        tg = float(t_gap)
+
+        t_coords = torch.arange(Kt, dtype=torch.float32) - (Kt - 1) / 2.0
+        z_coords = torch.arange(Kz, dtype=torch.float32) - (Kz - 1) / 2.0
+        y_coords = torch.arange(Kh, dtype=torch.float32) - (Kh - 1) / 2.0
+        x_coords = torch.arange(Kw, dtype=torch.float32) - (Kw - 1) / 2.0
+        T_g, Z_g, Y_g, X_g = torch.meshgrid(
+            t_coords, z_coords, y_coords, x_coords, indexing="ij"
+        )
+        # True physical distances (resolution-aware):
+        #   r3d_sq = (deltaZ * sz)^2 + (deltaY * sy)^2 + (deltaX * sx)^2  [mm^2]
+        #   dt_sq  = (|deltaT| * t_gap)^2                                  [s^2]
+        r3d_sq = (Z_g * sz) ** 2 + (Y_g * sy) ** 2 + (X_g * sx) ** 2   # [Kt,Kz,Kh,Kw]
+        dt_sq  = (T_g.abs() * tg) ** 2                                   # [Kt,Kz,Kh,Kw]
+
+        self.register_buffer("r3d_sq_flat", r3d_sq.reshape(-1), persistent=False)  # [N_pos]
+        self.register_buffer("dt_sq_flat",  dt_sq.reshape(-1),  persistent=False)  # [N_pos]
 
         d_pos = pos_feats.shape[-1]
         self.mlp = nn.Sequential(
@@ -145,11 +179,12 @@ class Hyena4DFilter(nn.Module):
             nn.Linear(hidden_dim, d_model),
         )
 
-        # Learnable anisotropic 4D decay rates (stored in log-space; softplus -> >= 0)
-        # alpha_s: how fast the kernel decays with 3D spatial distance
-        # alpha_t: how fast the kernel decays with temporal distance
-        self.log_alpha_s = nn.Parameter(torch.zeros(1))
-        self.log_alpha_t = nn.Parameter(torch.zeros(1))
+        # Learnable Gaussian decay rates (stored in log-space; softplus -> >= 0)
+        # alpha: spatial decay rate  [mm^{-2}]  — controls how fast the kernel
+        #        loses sensitivity to spatially distant voxels
+        # beta:  temporal decay rate [s^{-2}]   — controls temporal sensitivity decay
+        self.log_alpha = nn.Parameter(torch.zeros(1))
+        self.log_beta  = nn.Parameter(torch.zeros(1))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -174,15 +209,21 @@ class Hyena4DFilter(nn.Module):
         pos_feats = self.pos_feats.to(dtype=dtype)          # [N_pos, 6]
         kernel_vals = self.mlp(pos_feats)                   # [N_pos, C]
 
-        # --- 2. Learnable anisotropic 4D decay ---
-        alpha_s = F.softplus(self.log_alpha_s)              # spatial decay rate > 0
-        alpha_t = F.softplus(self.log_alpha_t)              # temporal decay rate > 0
-        r_3d    = self.r_3d_flat.to(dtype=dtype)            # [N_pos]
-        t_abs   = self.t_abs_flat.to(dtype=dtype)           # [N_pos]
+        # --- 2. Learnable Gaussian decay (physically meaningful, resolution-aware) ---
+        # New formula: exp(-alpha * (deltaX^2 + deltaY^2 + deltaZ^2) - beta * deltaT^2)
+        # where all deltas are TRUE physical distances:
+        #   deltaX_phys = x_index_offset * sx  [mm]
+        #   deltaY_phys = y_index_offset * sy  [mm]
+        #   deltaZ_phys = z_index_offset * sz  [mm]
+        #   deltaT_phys = |t_index_offset| * t_gap  [seconds]
+        alpha    = F.softplus(self.log_alpha)               # spatial  decay rate > 0  [mm^{-2}]
+        beta     = F.softplus(self.log_beta)                # temporal decay rate > 0  [s^{-2}]
+        r3d_sq   = self.r3d_sq_flat.to(dtype=dtype)         # [N_pos]  (deltaX^2+deltaY^2+deltaZ^2) in mm^2
+        dt_sq    = self.dt_sq_flat.to(dtype=dtype)          # [N_pos]  (deltaT_phys)^2 in s^2
 
-        # exp(-alpha_s * r_3d - alpha_t * |t|): anisotropic, rotation-invariant
-        decay_mask = torch.exp(-alpha_s * r_3d - alpha_t * t_abs)  # [N_pos]
-        kernel_vals = kernel_vals * decay_mask.unsqueeze(1)         # [N_pos, C]
+        # Gaussian decay: rotation-invariant in 3D space and independent in time
+        decay_mask = torch.exp(-alpha * r3d_sq - beta * dt_sq)  # [N_pos]
+        kernel_vals = kernel_vals * decay_mask.unsqueeze(1)      # [N_pos, C]
 
         # --- 3. Reshape into depthwise conv3d kernel ---
         kernel = kernel_vals.t().contiguous()               # [C, N_pos]

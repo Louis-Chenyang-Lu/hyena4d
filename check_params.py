@@ -93,7 +93,7 @@ C       = EMBED_DIM
 
 mlp_w1  = d_pos * h_mlp + h_mlp   # Linear(6, 64)
 mlp_w2  = h_mlp * C     + C       # Linear(64, 64)
-decay   = 2                        # log_alpha_s, log_alpha_t
+decay   = 2                        # log_alpha, log_beta (Gaussian decay rates)
 
 print()
 print("=" * 60)
@@ -104,7 +104,7 @@ print(f"  Positional features d_pos = {d_pos}  [t,r3d,r4d,dec_t,dec_3d,dec_4d]")
 print(f"  MLP: Linear({d_pos}→{h_mlp}) + GELU + Linear({h_mlp}→{C})")
 print(f"    = ({d_pos}×{h_mlp}+{h_mlp}) + ({h_mlp}×{C}+{C})")
 print(f"    = {mlp_w1} + {mlp_w2} = {mlp_w1+mlp_w2}")
-print(f"  Learnable decay params: log_alpha_s + log_alpha_t = {decay}")
+print(f"  Learnable decay params: log_alpha + log_beta (Gaussian) = {decay}")
 print(f"  Total per filter: {mlp_w1+mlp_w2+decay}")
 
 # ---------------------------------------------------------------
