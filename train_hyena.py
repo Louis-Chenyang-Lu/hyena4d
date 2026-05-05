@@ -138,6 +138,7 @@ class FMRISubsequenceDataset(Dataset):
         t_sub: int = 50,
         stride: int | None = None,
         subject_field: int = 1,
+        patch_size: tuple[int, int, int, int] | None = None,
     ):
         self.t_sub = t_sub
         stride = stride if stride is not None else t_sub   # non-overlapping default
@@ -145,6 +146,8 @@ class FMRISubsequenceDataset(Dataset):
         self.samples: list[tuple[str, int, int]] = []      # (filepath, t_start, sid_int)
         self.subject_to_int: dict[str, int] = {}
         self.int_to_subject: dict[int, str] = {}
+
+        min_H = min_W = min_Z = float("inf")
 
         skipped = 0
         for fname in sorted(f for f in os.listdir(input_dir) if _is_nifti(f)):
@@ -158,7 +161,11 @@ class FMRISubsequenceDataset(Dataset):
                 self.int_to_subject[idx] = subject
 
             sid = self.subject_to_int[subject]
-            T = nib.load(fpath).shape[3]
+            shape = nib.load(fpath).shape
+            H, W, Z, T = shape[0], shape[1], shape[2], shape[3]
+            min_H = min(min_H, H)
+            min_W = min(min_W, W)
+            min_Z = min(min_Z, Z)
 
             if T < t_sub:
                 skipped += 1
@@ -167,6 +174,14 @@ class FMRISubsequenceDataset(Dataset):
             for t_start in range(0, T - t_sub + 1, stride):
                 self.samples.append((fpath, t_start, sid))
 
+        # Compute the common spatial crop: smallest dims across all subjects,
+        # rounded down to the nearest patch multiple so RPE divides evenly.
+        ph, pw, pz = (patch_size[0], patch_size[1], patch_size[2]) if patch_size else (1, 1, 1)
+        tH = (int(min_H) // ph) * ph
+        tW = (int(min_W) // pw) * pw
+        tZ = (int(min_Z) // pz) * pz
+        self.target_shape: tuple[int, int, int] = (tH, tW, tZ)
+
         if skipped:
             print(f"  [Dataset] Skipped {skipped} file(s) shorter than t_sub={t_sub}")
         print(
@@ -174,6 +189,8 @@ class FMRISubsequenceDataset(Dataset):
             f"{len(self.subject_to_int)} subjects | "
             f"t_sub={t_sub} | stride={stride}"
         )
+        print(f"  [Dataset] Spatial crop : {tH}×{tW}×{tZ} "
+              f"(min across subjects, aligned to patch sizes {ph}×{pw}×{pz})")
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -183,6 +200,15 @@ class FMRISubsequenceDataset(Dataset):
         # dataobj gives memory-mapped access — only loads the requested slice
         arr = nib.load(fpath).dataobj[..., t_start : t_start + self.t_sub]
         vol = np.array(arr, dtype=np.float32)             # [H, W, Z, T_sub] — copy makes it writable
+
+        # Center-crop to target_shape so all subjects batch to the same size.
+        tH, tW, tZ = self.target_shape
+        H, W, Z = vol.shape[:3]
+        h0 = (H - tH) // 2
+        w0 = (W - tW) // 2
+        z0 = (Z - tZ) // 2
+        vol = vol[h0:h0 + tH, w0:w0 + tW, z0:z0 + tZ, :]
+
         return torch.from_numpy(vol), sid
 
 
@@ -465,6 +491,7 @@ def main() -> None:
         t_sub=args.t_sub,
         stride=args.stride,
         subject_field=args.subject_field,
+        patch_size=tuple(args.patch_size),
     )
     if len(dataset) == 0:
         raise RuntimeError("No valid subsequences found. Check --input-dir and --t-sub.")
