@@ -57,10 +57,6 @@ import torch
 from hyenapixel.hyena4d_model import Hyena4DContrastiveEncoder
 
 
-# ---------------------------------------------------------------------------
-# NIfTI utilities (mirrors train_hyena.py)
-# ---------------------------------------------------------------------------
-
 def _is_nifti(fname: str) -> bool:
     return fname.endswith(".nii") or fname.endswith(".nii.gz")
 
@@ -131,6 +127,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--t-gap", type=float, default=None,
                         help="TR / time between timepoints in seconds. "
                              "Auto-detected from NIfTI header if not specified.")
+    parser.add_argument("--t-sub", type=int, default=0,
+                        help="Split each volume into non-overlapping windows of this many "
+                             "timepoints before encoding, then mean-pool (0 = no split). "
+                             "Use the same value as --t-sub in training for best consistency.")
     return parser.parse_args()
 
 
@@ -157,7 +157,6 @@ def main() -> None:
         raise RuntimeError(f"No .nii / .nii.gz files found in '{args.input_dir}'")
     print(f"Found {len(nii_files)} NIfTI file(s)")
 
-    # --- Auto-detect physical parameters from first file ---
     first_fpath = os.path.join(args.input_dir, nii_files[0])
     auto_voxel, auto_t_gap = read_nifti_params(first_fpath)
     voxel_size = tuple(args.voxel_size) if args.voxel_size is not None else auto_voxel
@@ -179,67 +178,79 @@ def main() -> None:
         fpath = os.path.join(args.input_dir, fname)
         print(f"  {fname}  (subject={subject_id})")
 
-        vol = nib.load(fpath).get_fdata().astype(np.float32)  # [H, W, Z, T]
-        x = torch.from_numpy(vol).unsqueeze(0)                # [1, H, W, Z, T]
+        vol = nib.load(fpath).get_fdata().astype(np.float32)
 
-        with torch.inference_mode():
-            if args.no_rpe:
-                # Skip RPE — feed raw volume directly as single-channel input.
-                # [1, H, W, Z, T] → [1, 1, H, W, Z, T] → [1, 1, T, Z, H, W]
-                emb = x.unsqueeze(1).permute(0, 1, 5, 4, 2, 3).contiguous()
-            else:
-                # RPE on CPU — raw volumes are large
-                emb = rpe_embed_volume(
-                    x,
-                    patch_size=patch_size,
-                    hidden_dim=64,
-                    out_dim=args.projection_dim,
-                    patch_chunk=args.patch_chunk,
-                    voxel_chunk=voxel_chunk,
-                )  # [1, projection_dim, H_p, W_p, Z_p, T_p]
+        pH, pW, pZ, pT = patch_size
+        H, W, Z, T = vol.shape
+        tH = (H // pH) * pH; tW = (W // pW) * pW
+        tZ = (Z // pZ) * pZ; tT = (T // pT) * pT
+        h0 = (H - tH) // 2; w0 = (W - tW) // 2
+        z0 = (Z - tZ) // 2; t0 = (T - tT) // 2
+        vol = vol[h0:h0+tH, w0:w0+tW, z0:z0+tZ, t0:t0+tT]
+        if (tH, tW, tZ, tT) != (H, W, Z, T):
+            print(f"    auto-cropped {H}×{W}×{Z}×{T} → {tH}×{tW}×{tZ}×{tT}")
 
-                # Reorder axes to match Hyena4D expected layout: [B, C, T_p, Z_p, H_p, W_p]
-                emb = emb.permute(0, 1, 5, 4, 2, 3).contiguous()
+        if args.t_sub > 0 and vol.shape[3] >= args.t_sub:
+            n_win = vol.shape[3] // args.t_sub
+            win_vols = [vol[:, :, :, i * args.t_sub:(i + 1) * args.t_sub] for i in range(n_win)]
+        else:
+            win_vols = [vol]
 
-            if encoder is None:
-                in_channels = 1 if args.no_rpe else emb.shape[1]
-                encoder = Hyena4DContrastiveEncoder(
-                    in_channels=in_channels,
-                    embed_dim=args.embed_dim,
-                    num_blocks=args.num_blocks,
-                    projection_dim=args.projection_dim,
-                    kernel_size=(3, 3, 3, 3),
-                    voxel_size=voxel_size,
-                    t_gap=t_gap,
-                ).to(device).eval()
+        for win_vol in win_vols:
+            x = torch.from_numpy(win_vol).unsqueeze(0)
 
-                if args.checkpoint is not None:
-                    ckpt = torch.load(args.checkpoint, map_location=device)
-                    # train_hyena.py wraps encoder inside Hyena4DFullPipeline,
-                    # so strip the "encoder." prefix when loading
-                    raw_sd = ckpt["model_state_dict"]
-                    enc_sd = {
-                        k[len("encoder."):]: v
-                        for k, v in raw_sd.items()
-                        if k.startswith("encoder.")
-                    }
-                    encoder.load_state_dict(enc_sd)
-                    print(f"  Loaded encoder weights from '{args.checkpoint}' "
-                          f"(epoch {ckpt.get('epoch', '?')})")
+            with torch.inference_mode():
+                if args.no_rpe:
+                    emb = x.unsqueeze(1).permute(0, 1, 5, 4, 2, 3).contiguous()
+                else:
+                    emb = rpe_embed_volume(
+                        x,
+                        patch_size=patch_size,
+                        hidden_dim=64,
+                        out_dim=args.projection_dim,
+                        patch_chunk=args.patch_chunk,
+                        voxel_chunk=voxel_chunk,
+                    )
 
-            z = encoder(emb.to(device)).squeeze(0).detach().cpu()  # [projection_dim]
+                    emb = emb.permute(0, 1, 5, 4, 2, 3).contiguous()
 
-        subj_sum[subject_id] = subj_sum.get(subject_id, 0) + z
-        subj_count[subject_id] += 1
+                if encoder is None:
+                    in_channels = 1 if args.no_rpe else emb.shape[1]
+                    encoder = Hyena4DContrastiveEncoder(
+                        in_channels=in_channels,
+                        embed_dim=args.embed_dim,
+                        num_blocks=args.num_blocks,
+                        projection_dim=args.projection_dim,
+                        kernel_size=(3, 3, 3, 3),
+                        voxel_size=voxel_size,
+                        t_gap=t_gap,
+                    ).to(device).eval()
 
-        del x, emb, z
-        if device.type == "cuda":
-            torch.cuda.empty_cache()
+                    if args.checkpoint is not None:
+                        ckpt = torch.load(args.checkpoint, map_location=device)
+                        raw_sd = ckpt["model_state_dict"]
+                        enc_sd = {
+                            k[len("encoder."):]: v
+                            for k, v in raw_sd.items()
+                            if k.startswith("encoder.")
+                        }
+                        encoder.load_state_dict(enc_sd)
+                        print(f"  Loaded encoder weights from '{args.checkpoint}' "
+                              f"(epoch {ckpt.get('epoch', '?')})")
+
+                z = encoder(emb.to(device)).squeeze(0).detach().cpu()
+
+            subj_sum[subject_id] = subj_sum.get(subject_id, 0) + z
+            subj_count[subject_id] += 1
+
+            del x, emb, z
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
 
     subject_ids = sorted(subj_sum.keys())
     embeddings = torch.stack(
         [subj_sum[sid] / subj_count[sid] for sid in subject_ids], dim=0
-    )  # [N_subjects, projection_dim]
+    )
 
     save_path = os.path.join(args.output_dir, args.output_name)
     torch.save({"embeddings": embeddings, "subject_ids": subject_ids}, save_path)

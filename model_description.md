@@ -73,12 +73,12 @@ $$H_p = \lfloor H / p_H \rfloor, \quad
   T_p = \lfloor T / p_T \rfloor$$
 
 The volume is partitioned into $N_\text{patches} = B \cdot H_p W_p Z_p T_p$
-non-overlapping patches.  Explicitly, using the index notation
-$i_H \in \{0,\ldots,H_p{-}1\}$ and similarly for the other axes, patch
-$(i_H, i_W, i_Z, i_T)$ of sample $b$ contains the voxel set:
+non-overlapping patches.  Explicitly, using patch-grid indices
+$n_h \in \{0,\ldots,H_p{-}1\}$ and similarly for the other axes, patch
+$(n_h, n_w, n_z, n_t)$ of sample $b$ contains the voxel set:
 
-$$\mathcal{V}_{b,i_H,i_W,i_Z,i_T} = \bigl\{
-  X_{b,c,\, i_H p_H + \delta_h,\; i_W p_W + \delta_w,\; i_Z p_Z + \delta_z,\; i_T p_T + \delta_t}
+$$\mathcal{V}_{b,\,n_h,\,n_w,\,n_z,\,n_t} = \bigl\{
+  X_{b,\,c,\; n_h p_H + \delta_h,\; n_w p_W + \delta_w,\; n_z p_Z + \delta_z,\; n_t p_T + \delta_t}
   \;\Big|\;
   \delta_h \in [p_H],\; \delta_w \in [p_W],\; \delta_z \in [p_Z],\; \delta_t \in [p_T]
 \bigr\}$$
@@ -241,7 +241,7 @@ radial-symmetry property.
 
 **Additional decay buffers** (also computed at construction and cached):
 
-$$r^2_{3d} = (\delta Z)^2 + (\delta Y)^2 + (\delta X)^2 \;[\text{mm}^2]
+$$r_{3d}^2 = (\delta Z)^2 + (\delta Y)^2 + (\delta X)^2 \;[\text{mm}^2]
 \quad \longrightarrow \text{buffer } \mathtt{r3d\_sq\_flat} \in \mathbb{R}^{N_\text{pos}}$$
 
 $$(\delta T)^2 = (|\Delta t| \cdot \Delta T)^2 \;[\text{s}^2]
@@ -274,10 +274,10 @@ $$d(\Delta t, \Delta z, \Delta y, \Delta x) =
 \exp\!\Bigl(-\alpha\,\bigl[(\delta X)^2 + (\delta Y)^2 + (\delta Z)^2\bigr]
             -\beta\,(\delta T)^2\Bigr)$$
 
-$$= \exp\!\bigl(-\alpha\; r^2_{3d} - \beta\; (\delta T)^2\bigr)$$
+$$= \exp\!\bigl(-\alpha\; r_{3d}^2 - \beta\; (\delta T)^2\bigr)$$
 
 where:
-- $r^2_{3d} = (\delta X)^2 + (\delta Y)^2 + (\delta Z)^2$ with
+- $r_{3d}^2 = (\delta X)^2 + (\delta Y)^2 + (\delta Z)^2$ with
   $\delta X = \Delta x \cdot s_x$, etc. — **true spatial squared distance in mm$^2$**,
 - $(\delta T)^2 = (|\Delta t| \cdot \Delta T)^2$ — **true temporal squared distance in
   s$^2$**,
@@ -299,7 +299,7 @@ objects (initialised to 0, so $\alpha = \beta = \ln 2$ at init).
   filter is sharply local in space.
 - Similarly, $\sigma_t = 1/\sqrt{2\beta}$ seconds sets the temporal locality scale.
 - Unlike the previous linear-decay formula $e^{-\alpha_s r_{3d} - \alpha_t |\delta T|}$
-  (Laplacian), the Gaussian decay $e^{-\alpha r^2_{3d} - \beta (\delta T)^2}$ is
+  (Laplacian), the Gaussian decay $e^{-\alpha r_{3d}^2 - \beta (\delta T)^2}$ is
   differentiable at the origin and has faster tail decay, providing a stronger
   locality prior.
 
@@ -310,7 +310,7 @@ The final kernel weight for channel $c$ at position
 $(\Delta t, \Delta z, \Delta y, \Delta x)$ is:
 
 $$k_c(\Delta t, \Delta z, \Delta y, \Delta x) =
-k_{\text{base},c}(\mathbf{f}) \cdot \exp\!\bigl(-\alpha\; r^2_{3d} - \beta\; (\delta T)^2\bigr)$$
+k_{\text{base},c}(\mathbf{f}) \cdot \exp\!\bigl(-\alpha\; r_{3d}^2 - \beta\; (\delta T)^2\bigr)$$
 
 In matrix form:
 
@@ -569,7 +569,7 @@ $$\mathbf{E} = \text{cat}(\mathbf{e}_0,\ldots,\mathbf{e}_{B-1},\;\dim=0)
 $$\hat{\mathbf{Z}} = \text{Encoder}(\mathbf{E})
 \in \mathbb{R}^{B \times d_\text{proj}}$$
 
-$$\mathcal{L} = \text{InfoNCE}(\hat{\mathbf{Z}},\; \text{subject\_ids})$$
+$$\mathcal{L} = \text{InfoNCE}(\hat{\mathbf{Z}},\; \mathtt{subject\_ids})$$
 
 ### 9.2 Optimiser
 
@@ -637,9 +637,9 @@ exact count for your configuration.
 
 | Aspect | Current choice | Trade-off |
 |---|---|---|
-| **Gaussian vs Laplacian decay** | $\exp(-\alpha r^2_{3d} - \beta (\delta T)^2)$ | Differentiable at origin, faster tail decay, physically motivated (RBF); Laplacian has heavier tails |
+| **Gaussian vs Laplacian decay** | $\exp(-\alpha r_{3d}^2 - \beta (\delta T)^2)$ | Differentiable at origin, faster tail decay, physically motivated (RBF); Laplacian has heavier tails |
 | **RPE patch grid** | Fixed axis-aligned grid | Breaks rotation equivariance; computationally cheap and standard for fMRI |
-| **T×Z axis merging** | Conv3d over $D = T \cdot Z$ | Efficient; treats (Δt,Δz) along the same depth axis — kernel decay rates still separate $r^2_{3d}$ and $(\delta T)^2$ |
+| **T×Z axis merging** | Conv3d over $D = T \cdot Z$ | Efficient; treats (Δt,Δz) along the same depth axis — kernel decay rates still separate $r_{3d}^2$ and $(\delta T)^2$ |
 | **Simultaneous slice assumption** | $\delta T = \|\Delta t\| \cdot \Delta T$ | All slices treated as acquired within the same TR; no slice-timing correction |
 | **Rotation invariance** | Radially symmetric kernel + global mean pool | Spatial layout discarded; invariance achieved at the cost of spatial structure in the embedding |
 | **Contrastive positive definition** | Same subject ID = positive | No within-subject temporal structure exploited; assumes intra-subject similarity |
