@@ -52,7 +52,7 @@ are read per sample.
 
 Two scanner-dependent parameters are passed at model construction:
 
-$$\text{voxel\_size} = (s_z, s_y, s_x)\ \text{mm}, \qquad \text{t\_gap} = \Delta T\ \text{s}$$
+$$\mathtt{voxel\_size} = (s_z, s_y, s_x)\ \text{mm}, \qquad \mathtt{t\_gap} = \Delta T\ \text{s}$$
 
 These convert voxel-index offsets to true physical distances and are baked into the
 kernel's positional buffers (see §4.2).
@@ -77,11 +77,11 @@ non-overlapping patches.  Explicitly, using patch-grid indices
 $n_h \in \{0,\ldots,H_p{-}1\}$ and similarly for the other axes, patch
 $(n_h, n_w, n_z, n_t)$ of sample $b$ contains the voxel set:
 
-$$\mathcal{V}_{b,\,n_h,\,n_w,\,n_z,\,n_t} = \bigl\{
+$$\mathcal{V}_{b,\,n_h,\,n_w,\,n_z,\,n_t} = \bigl\lbrace
   X_{b,\,c,\; n_h p_H + \delta_h,\; n_w p_W + \delta_w,\; n_z p_Z + \delta_z,\; n_t p_T + \delta_t}
   \;\Big|\;
   \delta_h \in [p_H],\; \delta_w \in [p_W],\; \delta_z \in [p_Z],\; \delta_t \in [p_T]
-\bigr\}$$
+\bigr\rbrace$$
 
 where $[n] = \{0,\ldots,n{-}1\}$.  This is implemented as a single reshape-and-permute:
 
@@ -505,13 +505,13 @@ where $\tau$ is the temperature (default $\tau = 0.1$).
 
 Let $\text{id}_i$ denote the subject ID of sample $i$.  Define:
 
-$$\text{pos\_mask}_{ij} =
+$$\mathtt{pos\_mask}_{ij} =
 \begin{cases}
 1 & \text{if } \text{id}_i = \text{id}_j \text{ and } i \neq j \\
 0 & \text{otherwise}
 \end{cases}$$
 
-$$\text{logits\_mask}_{ij} = \mathbf{1}[i \neq j]$$
+$$\mathtt{logits\_mask}_{ij} = \mathbf{1}[i \neq j]$$
 
 The diagonal ($i = j$, self-similarity) is excluded from all computations.
 
@@ -640,7 +640,7 @@ exact count for your configuration.
 | **Gaussian vs Laplacian decay** | $\exp(-\alpha r_{3d}^2 - \beta (\delta T)^2)$ | Differentiable at origin, faster tail decay, physically motivated (RBF); Laplacian has heavier tails |
 | **RPE patch grid** | Fixed axis-aligned grid | Breaks rotation equivariance; computationally cheap and standard for fMRI |
 | **T×Z axis merging** | Conv3d over $D = T \cdot Z$ | Efficient; treats (Δt,Δz) along the same depth axis — kernel decay rates still separate $r_{3d}^2$ and $(\delta T)^2$ |
-| **Simultaneous slice assumption** | $\delta T = \|\Delta t\| \cdot \Delta T$ | All slices treated as acquired within the same TR; no slice-timing correction |
+| **Simultaneous slice assumption** | $\delta T = |\Delta t| \cdot \Delta T$ | All slices treated as acquired within the same TR; no slice-timing correction |
 | **Rotation invariance** | Radially symmetric kernel + global mean pool | Spatial layout discarded; invariance achieved at the cost of spatial structure in the embedding |
 | **Contrastive positive definition** | Same subject ID = positive | No within-subject temporal structure exploited; assumes intra-subject similarity |
 | **Global mean pool** | Averages over all $T_p Z_p H_p W_p$ positions | Throws away spatial layout; enables permutation/rotation invariance at the embedding level |
