@@ -37,3 +37,6 @@ target_data/
 .vscode/
 *.swp
 *.zip
+
+# user-specific analysis files
+analysis*.ipynb
