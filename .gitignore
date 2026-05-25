@@ -42,3 +42,4 @@ target_data/
 analysis*.ipynb
 data_aux/
 output/
+reading/
