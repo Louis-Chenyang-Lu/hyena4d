@@ -13,10 +13,10 @@ build/
 venv/
 env/
 
-# PyTorch checkpoints and outputs
-*.pt
-*.pth
-*.ckpt
+# # PyTorch checkpoints and outputs
+# *.pt
+# *.pth
+# *.ckpt
 
 # NIfTI data (large binary files — store externally)
 input/**/*.nii
@@ -41,5 +41,6 @@ target_data/
 # user-specific analysis files
 analysis*.ipynb
 data_aux/
-output/
+# output/
 reading/
+claude*
