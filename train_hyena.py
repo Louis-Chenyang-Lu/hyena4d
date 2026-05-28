@@ -307,6 +307,13 @@ def train_one_epoch(
         vols        = vols.to(device)           # [B, H, W, Z, T]
         subject_ids = subject_ids.to(device)    # [B]
 
+        # Skip batches with no same-mouse pair: the loss is identically 0
+        # there and carries no gradient, so counting it would bias the
+        # epoch mean (and best-model selection) toward emptier batches.
+        n_pos = (subject_ids.unsqueeze(0) == subject_ids.unsqueeze(1)).sum() - len(subject_ids)
+        if n_pos.item() == 0:
+            continue
+
         optimizer.zero_grad()
         z    = model(vols)                      # [B, projection_dim]
         loss = subject_contrastive_loss(z, subject_ids, temperature=temperature)

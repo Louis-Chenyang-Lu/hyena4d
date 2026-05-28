@@ -38,6 +38,7 @@ Usage:
     --patch-chunk      N     Patches per RPE forward chunk    (default: 16)
     --voxel-chunk      N     Voxels per inner chunk (0=all)   (default: 512)
     --embed-dim        N     Hyena4D embedding dimension      (default: 64)
+    --rpe-hidden       N     Hidden dim of the RPE phi MLP    (default: 64)
     --num-blocks       N     Number of Hyena4D blocks         (default: 4)
     --projection-dim   N     Contrastive projection dim       (default: 128)
     --subject-field    N     Token index in filename (split on '_') for subject ID
@@ -84,8 +85,7 @@ def read_nifti_params(fpath: str) -> tuple[tuple[float, float, float], float]:
             tr /= 1000.0
         t_gap = tr
     return (sz, sy, sx), t_gap
-from run_rpe import rpe_embed_volume
-
+from invariant_patching_4d import PermInvariantPatchEmbedding4D
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -112,6 +112,9 @@ def parse_args() -> argparse.Namespace:
                         help="Voxels per inner chunking loop (0 = disabled)")
     parser.add_argument("--embed-dim", type=int, default=64,
                         help="Hyena4D backbone embedding dimension")
+    parser.add_argument("--rpe-hidden", type=int, default=64,
+                        help="Hidden dim of the RPE phi MLP. "
+                             "Must match --rpe-hidden used in train_hyena.py.")
     parser.add_argument("--num-blocks", type=int, default=4,
                         help="Number of Hyena4DPixelBlocks in the backbone")
     parser.add_argument("--projection-dim", type=int, default=128,
@@ -169,6 +172,8 @@ def main() -> None:
         print("WARNING: no --checkpoint provided; using random weights.")
 
     encoder = None
+    rpe = None
+
     subj_sum: dict[str, torch.Tensor] = {}
     subj_count: dict[str, int] = defaultdict(int)
 
@@ -203,15 +208,32 @@ def main() -> None:
                 if args.no_rpe:
                     emb = x.unsqueeze(1).permute(0, 1, 5, 4, 2, 3).contiguous()
                 else:
-                    emb = rpe_embed_volume(
-                        x,
-                        patch_size=patch_size,
-                        hidden_dim=64,
-                        out_dim=args.projection_dim,
-                        patch_chunk=args.patch_chunk,
-                        voxel_chunk=voxel_chunk,
-                    )
+                    if rpe is None:
+                        rpe = PermInvariantPatchEmbedding4D(
+                            in_channels=1,
+                            hidden_dim=args.rpe_hidden,
+                            out_dim=args.projection_dim,
+                            patch_size=patch_size,
+                            patch_chunk=args.patch_chunk,
+                            voxel_chunk=voxel_chunk,
+                        ).to(device).eval()
 
+                        # Load trained RPE weights only when a checkpoint is
+                        # given. With no checkpoint, the RPE stays randomly
+                        # initialised — matching the encoder's behaviour in
+                        # the same case (see the encoder block below).
+                        if args.checkpoint is not None:
+                            ckpt_rpe = torch.load(args.checkpoint, map_location=device)
+                            rpe_sd = {
+                                k[len("rpe."):]: v
+                                for k, v in ckpt_rpe["model_state_dict"].items()
+                                if k.startswith("rpe.")
+                            }
+                            rpe.load_state_dict(rpe_sd)
+                            print(f"  Loaded RPE weights from '{args.checkpoint}'")
+
+                    emb = x.unsqueeze(1).to(device)          # [1, 1, H, W, Z, T]
+                    emb = rpe(emb)                            # [1, proj, H_p, W_p, Z_p, T_p]
                     emb = emb.permute(0, 1, 5, 4, 2, 3).contiguous()
 
                 if encoder is None:

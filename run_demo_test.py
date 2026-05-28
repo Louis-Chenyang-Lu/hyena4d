@@ -74,7 +74,7 @@ def run(cmd, label):
 
 train_cmd = [
     sys.executable, "train_hyena.py",
-    "--input-dir",      "input/pretrain",
+    "--input-dir",      "input/pretrain/normalized",
     "--output-dir",     "output_test",
     "--subject-field",  "0",          # sub-001_... → field 0
     "--patch-size",     "9", "4", "5", "10",
@@ -101,6 +101,7 @@ infer_cmd = [
     "--checkpoint",     "output_test/best_model.pt",
     "--subject-field",  "1",          # driftRespCardlessBOLD_B16_... → field 1
     "--patch-size",     "8", "8", "4", "10",
+    "--t-sub",          "50",         # must match training patch size
     "--embed-dim",      "64",
     "--num-blocks",     "4",
     "--projection-dim", "128",
@@ -147,8 +148,14 @@ print(f"    L2 norms       : {norms_infer.tolist()}  (expected ≈ 1.0)")
 
 assert tuple(train_embs.shape) == (3, 128), "Wrong training embedding shape!"
 assert tuple(infer_embs.shape) == (1, 128), "Wrong inference embedding shape!"
-assert torch.allclose(norms_train, torch.ones(3), atol=1e-3), "Train embeddings not L2-normalised!"
-assert torch.allclose(norms_infer, torch.ones(1), atol=1e-3), "Infer embeddings not L2-normalised!"
+# Subject embeddings are the mean of L2-normalised clip embeddings, so they
+# are NOT unit-norm unless every clip embedding is identical (see
+# model_description.md §10). Assert the mathematically correct bound instead:
+# the mean of unit vectors has norm in (0, 1].
+assert (norms_train > 0).all() and (norms_train <= 1.0 + 1e-3).all(), \
+    f"Train subject-embedding norms outside (0, 1]: {norms_train.tolist()}"
+assert (norms_infer > 0).all() and (norms_infer <= 1.0 + 1e-3).all(), \
+    f"Infer subject-embedding norms outside (0, 1]: {norms_infer.tolist()}"
 print("\n  CHECK 1 PASSED")
 
 
