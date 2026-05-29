@@ -41,7 +41,7 @@ PROCESS = psutil.Process(os.getpid())
 # Configuration — mirror the flags used in your real inference run
 # ---------------------------------------------------------------------------
 
-TRAIN_OUTPUT_DIR = f"output/output_smoke"           # where train_smoke_test.py wrote its checkpoint
+TRAIN_OUTPUT_DIR = f"output/smoke_test"           # where train_smoke_test.py wrote its checkpoint
 INFER_OUTPUT_DIR = TRAIN_OUTPUT_DIR         # where this test writes its output
 CHECKPOINT_PATH  = os.path.join(TRAIN_OUTPUT_DIR, "best_model.pt")
 
