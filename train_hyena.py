@@ -64,6 +64,8 @@ from tqdm import tqdm
 from hyenapixel.hyena4d_model import Hyena4DContrastiveEncoder, subject_contrastive_loss
 from invariant_patching_4d import PermInvariantPatchEmbedding4D
 
+if not hasattr(torch.amp, "GradScaler") and hasattr(torch.cuda.amp, "GradScaler"):
+    torch.amp.GradScaler = torch.cuda.amp.GradScaler
 
 # ---------------------------------------------------------------------------
 # NIfTI utilities
@@ -576,12 +578,14 @@ def main() -> None:
 
     # --- Resume from checkpoint if requested ---
     start_epoch = 1
+    best_loss = float("inf")
+
     if args.resume:
-        start_epoch, _ = load_checkpoint(args.resume, model, optimizer, device)
+        start_epoch, best_loss = load_checkpoint(args.resume, model, optimizer, device)
         start_epoch += 1   # resume at the *next* epoch
 
-    # --- Training loop ---
-    best_loss = float("inf")
+    # --- Training loop ---    
+
     epoch_pbar = tqdm(
         range(start_epoch, args.epochs + 1),
         desc="Training",
