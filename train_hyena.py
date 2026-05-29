@@ -240,6 +240,7 @@ class Hyena4DFullPipeline(nn.Module):
         voxel_chunk: int | None,
         voxel_size: tuple = (1.0, 1.0, 1.0),
         t_gap: float = 1.0,
+        memory_efficient: bool = False,
     ):
         super().__init__()
         self.rpe = PermInvariantPatchEmbedding4D(
@@ -260,24 +261,31 @@ class Hyena4DFullPipeline(nn.Module):
             t_gap=t_gap,
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: [B, H, W, Z, T]
-        Returns:
-            z: [B, projection_dim]
-        """
-        # RPE: loop over samples to bound memory to one volume at a time.
-        # Peak memory = one raw volume + B × (small RPE output).
+        # Bind the correct forward implementation at construction time so
+        # torch.compile sees a branch-free graph regardless of which path
+        # was chosen.
+        if memory_efficient:
+            self.forward = self._forward_memory_efficient
+        else:
+            self.forward = self._forward_batched
+
+    def _forward_batched(self, x: torch.Tensor) -> torch.Tensor:
+        """Full-batch RPE — fast path for H100."""
+        x_in = x.unsqueeze(1)                               # [B, 1, H, W, Z, T]
+        emb  = self.rpe(x_in)                               # [B, proj, H_p, W_p, Z_p, T_p]
+        emb  = emb.permute(0, 1, 5, 4, 2, 3).contiguous()  # [B, proj, T_p, Z_p, H_p, W_p]
+        return self.encoder(emb)
+
+    def _forward_memory_efficient(self, x: torch.Tensor) -> torch.Tensor:
+        """Per-sample RPE — memory-safe path for CPU or small GPUs."""
         rpe_outs = []
         for i in range(x.shape[0]):
-            xi = x[i : i + 1].unsqueeze(1)                 # [1, 1, H, W, Z, T]
-            emb = self.rpe(xi)                              # [1, proj, H_p, W_p, Z_p, T_p]
-            emb = emb.permute(0, 1, 5, 4, 2, 3).contiguous()  # [1, proj, T_p, Z_p, H_p, W_p]
+            xi  = x[i : i + 1].unsqueeze(1)                 # [1, 1, H, W, Z, T]
+            emb = self.rpe(xi)                               # [1, proj, H_p, W_p, Z_p, T_p]
+            emb = emb.permute(0, 1, 5, 4, 2, 3).contiguous()
             rpe_outs.append(emb)
-
-        rpe_batch = torch.cat(rpe_outs, dim=0)              # [B, proj, T_p, Z_p, H_p, W_p]
-        return self.encoder(rpe_batch)                      # [B, projection_dim]
+        emb = torch.cat(rpe_outs, dim=0)
+        return self.encoder(emb)
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +296,7 @@ def train_one_epoch(
     model: Hyena4DFullPipeline,
     loader: DataLoader,
     optimizer: optim.Optimizer,
+    scaler: torch.amp.GradScaler,
     device: torch.device,
     epoch: int,
     num_epochs: int,
@@ -307,18 +316,14 @@ def train_one_epoch(
         vols        = vols.to(device)           # [B, H, W, Z, T]
         subject_ids = subject_ids.to(device)    # [B]
 
-        # Skip batches with no same-mouse pair: the loss is identically 0
-        # there and carries no gradient, so counting it would bias the
-        # epoch mean (and best-model selection) toward emptier batches.
-        n_pos = (subject_ids.unsqueeze(0) == subject_ids.unsqueeze(1)).sum() - len(subject_ids)
-        if n_pos.item() == 0:
-            continue
-
         optimizer.zero_grad()
-        z    = model(vols)                      # [B, projection_dim]
-        loss = subject_contrastive_loss(z, subject_ids, temperature=temperature)
-        loss.backward()
-        optimizer.step()
+        with torch.autocast(device_type=device.type, dtype=torch.bfloat16,
+                            enabled=(device.type == "cuda")):
+            z    = model(vols)                  # [B, projection_dim]
+            loss = subject_contrastive_loss(z, subject_ids, temperature=temperature)
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
         running_loss += loss.item()
         n_batches    += 1
@@ -337,6 +342,7 @@ def compute_subject_embeddings(
     dataset: FMRISubsequenceDataset,
     device: torch.device,
     batch_size: int,
+    num_workers: int,
 ) -> dict[str, torch.Tensor]:
     """
     Stream all subsequences through the model and mean-pool per subject.
@@ -348,7 +354,7 @@ def compute_subject_embeddings(
         {subject_str: embedding [projection_dim]}  (on CPU)
     """
     model.eval()
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=(num_workers > 0))
 
     emb_sum:   dict[int, torch.Tensor] = {}
     emb_count: dict[int, int]          = defaultdict(int)
@@ -376,10 +382,14 @@ def save_checkpoint(
     epoch: int,
     loss: float,
 ) -> None:
+    # torch.compile wraps the model and prefixes state_dict keys with "_orig_mod.";
+    # save the underlying module's state_dict so downstream loaders (run_hyena.py)
+    # see the same keys as in the un-compiled class.
+    inner = getattr(model, "_orig_mod", model)
     torch.save(
         {
             "epoch":                epoch,
-            "model_state_dict":     model.state_dict(),
+            "model_state_dict":     inner.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "loss":                 loss,
         },
@@ -395,7 +405,8 @@ def load_checkpoint(
 ) -> tuple[int, float]:
     """Load checkpoint and return (epoch, loss) so training can resume."""
     ckpt = torch.load(path, map_location=device)
-    model.load_state_dict(ckpt["model_state_dict"])
+    inner = getattr(model, "_orig_mod", model)
+    inner.load_state_dict(ckpt["model_state_dict"])
     optimizer.load_state_dict(ckpt["optimizer_state_dict"])
     print(f"  Resumed from '{path}'  (epoch {ckpt['epoch']}, loss {ckpt['loss']:.4f})")
     return ckpt["epoch"], ckpt["loss"]
@@ -422,6 +433,8 @@ def parse_args() -> argparse.Namespace:
                    help="Sliding window stride (default: t_sub → non-overlapping)")
     p.add_argument("--subject-field",  type=int,   default=1,
                    help="Index of subject ID token when filename is split on '_'")
+    p.add_argument("--num-workers",    type=int,   default=0,
+                   help="Number of worker processes for data loading")
     # Model
     p.add_argument("--patch-size",     nargs=4, type=int, default=[8, 8, 4, 10],
                    metavar=("H", "W", "Z", "T"),
@@ -448,6 +461,9 @@ def parse_args() -> argparse.Namespace:
                    help="Patches per RPE forward chunk (lower = less RAM)")
     p.add_argument("--voxel-chunk",    type=int,   default=512,
                    help="Voxels per inner RPE chunk (0 = disabled)")
+    p.add_argument("--memory-efficient", action="store_true", default=False,
+                    help="Run RPE one sample at a time to reduce peak memory. "
+                            "Default off (batched RPE). Use on CPU or small GPUs.")
     # Training
     p.add_argument("--epochs",         type=int,   default=50,
                    help="Total training epochs")
@@ -503,11 +519,20 @@ def main() -> None:
     if len(dataset) == 0:
         raise RuntimeError("No valid subsequences found. Check --input-dir and --t-sub.")
 
+    num_workers=args.num_workers
+    if device.type == "cuda" and num_workers == 0:
+        print("  Warning: num_workers=0 may lead to slow data loading on GPU. "
+              "Consider setting --num-workers > 0 for faster training.")
+    if device.type != "cuda" and num_workers > 0:
+        print("  Warning: num_workers > 0 has no effect on CPU. Setting num_workers=0.")
+        num_workers = 0
+
     loader = DataLoader(
         dataset,
         batch_size=args.batch_size,
         shuffle=True,
-        num_workers=0,          # nibabel + Windows: keep workers=0
+        num_workers=num_workers,          # nibabel + Windows: keep workers=0
+        persistent_workers=(num_workers > 0),
         pin_memory=(device.type == "cuda"),
         drop_last=True,         # avoids single-sample batches that break contrastive loss
     )
@@ -515,6 +540,15 @@ def main() -> None:
 
     # --- Model ---
     voxel_chunk = args.voxel_chunk if args.voxel_chunk > 0 else None
+
+    memory_efficient=args.memory_efficient
+    if device.type == "cuda" and memory_efficient:
+        print("  Warning: --memory-efficient is enabled, which may slow down training on GPU. "
+              "Consider disabling it for faster training on H100.")
+    if device.type != "cuda" and not memory_efficient:
+        print("  Warning: --memory-efficient is disabled, which may lead to OOM on CPU. "
+              "Consider enabling it for safer training on CPU.")
+
     model = Hyena4DFullPipeline(
         patch_size=tuple(args.patch_size),
         rpe_hidden_dim=args.rpe_hidden,
@@ -526,13 +560,19 @@ def main() -> None:
         voxel_chunk=voxel_chunk,
         voxel_size=voxel_size,
         t_gap=t_gap,
+        memory_efficient=memory_efficient,
     ).to(device)
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"  Trainable params : {n_params:,}")
 
+    if device.type == "cuda":
+        model = torch.compile(model)
+        print("  torch.compile enabled (first batch will be slow — this is normal)")
+
     # --- Optimizer ---
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda"))
 
     # --- Resume from checkpoint if requested ---
     start_epoch = 1
@@ -549,7 +589,7 @@ def main() -> None:
     )
     for epoch in epoch_pbar:
         loss = train_one_epoch(
-            model, loader, optimizer, device,
+            model, loader, optimizer, scaler, device,
             epoch, args.epochs, args.temperature,
         )
 
@@ -572,7 +612,7 @@ def main() -> None:
 
     # --- Subject-level embeddings ---
     print("\nComputing subject-level embeddings (mean pool over subsequences)...")
-    subject_embs = compute_subject_embeddings(model, dataset, device, args.batch_size)
+    subject_embs = compute_subject_embeddings(model, dataset, device, args.batch_size, num_workers)
     subject_list = sorted(subject_embs.keys())
     emb_tensor   = torch.stack([subject_embs[s] for s in subject_list])  # [N, proj_dim]
 
