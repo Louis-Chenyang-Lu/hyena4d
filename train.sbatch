@@ -27,7 +27,6 @@ python3 train_hyena.py \
     --output-dir output/run1_ilia \
     --subject-field 0 \
     --num-workers 7 \
-    # --memory-efficient \
     --patch-size 9 4 5 10 \
     --patch-chunk 2500 \
     --t-sub 50 \
