@@ -5,8 +5,8 @@
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=8                      ## match num-workers=7 + 1 main process
-#SBATCH --gres=gpu:H100:1                      ## same hardware as real run
-#SBATCH --mem=32G
+#SBATCH --gres=gpu:V100:1                      ## same hardware as real run
+#SBATCH --mem=8G
 ##–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 #SBATCH --job-name="hyena_smoke"
 #SBATCH --output=output_smoke/%x-%j.out

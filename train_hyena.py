@@ -319,7 +319,7 @@ def train_one_epoch(
         subject_ids = subject_ids.to(device)    # [B]
 
         optimizer.zero_grad()
-        with torch.autocast(device_type=device.type, dtype=torch.bfloat16,
+        with torch.autocast(device_type=device.type, dtype=torch.float16,
                             enabled=(device.type == "cuda")):
             z    = model(vols)                  # [B, projection_dim]
             loss = subject_contrastive_loss(z, subject_ids, temperature=temperature)

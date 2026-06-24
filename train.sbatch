@@ -4,7 +4,7 @@
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=8                      ## number of cores per task (if not specified, default is 1)
-#SBATCH --gres=gpu:H100:1                      ## number of gpus per node, select between gpu:V100:1, gpu:V100:2, gpu:H100:1, gpu:H100:2 (if not specified, no gpu will be allocated)
+#SBATCH --gres=gpu:V100:1                      ## number of gpus per node, select between gpu:V100:1, gpu:V100:2, gpu:H100:1, gpu:H100:2 (if not specified, no gpu will be allocated)
 #SBATCH --mem=32G                              ## total memory required(entire memory,if not specified)
 ##–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 #SBATCH --job-name="hyena_pretrain"            ## specify a custom name for the job
@@ -30,7 +30,7 @@ python3 train_hyena.py \
     --patch-size 9 4 5 10 \
     --patch-chunk 2500 \
     --t-sub 50 \
-    --batch-size 128 \
+    --batch-size 75 \
     --epochs 50 \
 
 
