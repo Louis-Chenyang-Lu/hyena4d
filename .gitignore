@@ -41,6 +41,6 @@ target_data/
 # user-specific analysis files
 analysis*.ipynb
 data_and_aux/
-output/failed/
+# output/failed/
 reading/
 claude*

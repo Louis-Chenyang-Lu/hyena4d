@@ -1,0 +1,67 @@
+Training:   0%|          | 0/50 [00:00<?, ?epoch/s]
+Epoch 001/50:   0%|          | 0/25 [00:00<?, ?batch/s][A
+                                                       [ATraining:   0%|          | 0/50 [02:25<?, ?epoch/s]
+Traceback (most recent call last):
+  File "/u/lomasov2/hyena4d/train_hyena.py", line 629, in <module>
+    main()
+  File "/u/lomasov2/hyena4d/train_hyena.py", line 595, in main
+    loss = train_one_epoch(
+  File "/u/lomasov2/hyena4d/train_hyena.py", line 324, in train_one_epoch
+    z    = model(vols)                  # [B, projection_dim]
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1511, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1520, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py", line 489, in _fn
+    return fn(*args, **kwargs)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1511, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1520, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/u/lomasov2/hyena4d/train_hyena.py", line 274, in _forward_batched
+    def _forward_batched(self, x: torch.Tensor) -> torch.Tensor:
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py", line 489, in _fn
+    return fn(*args, **kwargs)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/_dynamo/external_utils.py", line 17, in inner
+    return fn(*args, **kwargs)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/_functorch/aot_autograd.py", line 901, in forward
+    return compiled_fn(full_args)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/_functorch/_aot_autograd/utils.py", line 81, in g
+    return f(*args)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 83, in runtime_wrapper
+    all_outs = call_func_at_runtime_with_args(
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/_functorch/_aot_autograd/utils.py", line 105, in call_func_at_runtime_with_args
+    out = normalize_as_list(f(args))
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/_functorch/_aot_autograd/utils.py", line 81, in g
+    return f(*args)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/autograd/function.py", line 553, in apply
+    return super().apply(*args, **kwargs)  # type: ignore[misc]
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/_functorch/_aot_autograd/jit_compile_runtime_wrappers.py", line 408, in forward
+    fw_outs = call_func_at_runtime_with_args(
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/_functorch/_aot_autograd/utils.py", line 105, in call_func_at_runtime_with_args
+    out = normalize_as_list(f(args))
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/_inductor/codecache.py", line 864, in __call__
+    return self.get_current_callable()(inputs)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/_inductor/compile_fx.py", line 611, in run
+    return model(new_inputs)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/_inductor/codecache.py", line 892, in _run_from_cache
+    return compiled_graph.compiled_artifact(inputs)
+  File "/tmp/torchinductor_lomasov2/dk/cdkxkyzbs7a427hoestfrktpkis4lzqujpg3opwplycvdgcsts6f.py", line 5972, in call
+    triton_poi_fused__to_copy_85.run(primals_83, buf417, 1152000, grid=grid(1152000), stream=stream0)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/_inductor/triton_heuristics.py", line 533, in run
+    self.autotune_to_one_config(*args, grid=grid, **kwargs)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/_inductor/triton_heuristics.py", line 437, in autotune_to_one_config
+    timings = self.benchmark_all_configs(*args, **kwargs)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/_dynamo/utils.py", line 244, in time_wrapper
+    r = func(*args, **kwargs)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/_inductor/triton_heuristics.py", line 413, in benchmark_all_configs
+    timings = {
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/_inductor/triton_heuristics.py", line 414, in <dictcomp>
+    launcher: self.bench(launcher, *args, **kwargs)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/_inductor/triton_heuristics.py", line 385, in bench
+    return do_bench(kernel_call, rep=40, fast_flush=True)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/_inductor/utils.py", line 167, in do_bench
+    return triton_do_bench(*args, **kwargs)[0]
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/triton/testing.py", line 109, in do_bench
+    cache = torch.empty(int(256e6 // 4), dtype=torch.int, device='cuda')
+torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to allocate 246.00 MiB. GPU 0 has a total capacity of 31.73 GiB of which 108.25 MiB is free. Including non-PyTorch memory, this process has 31.61 GiB memory in use. Of the allocated memory 30.31 GiB is allocated by PyTorch, and 948.87 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)

@@ -1,0 +1,8 @@
+Device : cuda
+  Physical params : voxel_size=('0.2000', '0.2222', '0.5000') mm  t_gap=1.0000 s  (from header)
+  [Dataset] 1890 subsequences | 225 subjects | t_sub=50 | stride=50
+  [Dataset] Spatial crop : 63×12×30 (min across subjects, aligned to patch sizes 9×4×5)
+  Batches/epoch : 189
+  Warning: --memory-efficient is enabled, which may slow down training on GPU. Consider disabling it for faster training on H100.
+  Trainable params : 193,736
+  torch.compile enabled (first batch will be slow — this is normal)

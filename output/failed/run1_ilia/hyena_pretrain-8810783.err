@@ -1,0 +1,13 @@
+Training:   0%|          | 0/50 [00:00<?, ?epoch/s]
+Epoch 001/50:   0%|          | 0/25 [00:00<?, ?batch/s][A
+                                                       [ATraining:   0%|          | 0/50 [00:53<?, ?epoch/s]
+Traceback (most recent call last):
+  File "/u/lomasov2/hyena4d/train_hyena.py", line 629, in <module>
+    main()
+  File "/u/lomasov2/hyena4d/train_hyena.py", line 595, in main
+    loss = train_one_epoch(
+  File "/u/lomasov2/hyena4d/train_hyena.py", line 322, in train_one_epoch
+    with torch.autocast(device_type=device.type, dtype=torch.bfloat16,
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/amp/autocast_mode.py", line 306, in __init__
+    raise RuntimeError(
+RuntimeError: Current CUDA Device does not support bfloat16. Please switch dtype to float16.

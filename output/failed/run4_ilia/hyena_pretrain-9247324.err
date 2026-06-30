@@ -1,0 +1,3 @@
+Training:   0%|          | 0/50 [00:00<?, ?epoch/s]
+Epoch 001/50:   0%|          | 0/25 [00:00<?, ?batch/s][A/var/spool/slurmd/job9247324/slurm_script: line 35: 2327411 Killed                  python3 train_hyena.py --input-dir input/pretrain/normalized --output-dir output/run1_ilia --subject-field 0 --num-workers 7 --patch-size 9 4 5 10 --patch-chunk 50 --t-sub 50 --batch-size 75 --epochs 50
+[2026-06-28T16:04:44.443] error: Detected 1 oom_kill event in StepId=9247324.batch. Some of the step tasks have been OOM Killed.

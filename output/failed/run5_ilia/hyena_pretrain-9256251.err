@@ -1,0 +1,18 @@
+Training:   0%|          | 0/50 [00:00<?, ?epoch/s]
+Epoch 001/50:   0%|          | 0/189 [00:00<?, ?batch/s][A
+                                                        [ATraining:   0%|          | 0/50 [17:46<?, ?epoch/s]
+Traceback (most recent call last):
+  File "/u/lomasov2/hyena4d/train_hyena.py", line 629, in <module>
+    main()
+  File "/u/lomasov2/hyena4d/train_hyena.py", line 595, in main
+    loss = train_one_epoch(
+  File "/u/lomasov2/hyena4d/train_hyena.py", line 326, in train_one_epoch
+    scaler.scale(loss).backward()
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/cuda/amp/grad_scaler.py", line 205, in scale
+    self._lazy_init_scale_growth_tracker(outputs.device)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/cuda/amp/grad_scaler.py", line 164, in _lazy_init_scale_growth_tracker
+    self._scale = torch.full((), self._init_scale, dtype=torch.float32, device=dev)
+TypeError: full() received an invalid combination of arguments - got (tuple, str, device=torch.device, dtype=torch.dtype), but expected one of:
+ * (tuple of ints size, Number fill_value, *, tuple of names names, torch.dtype dtype, torch.layout layout, torch.device device, bool pin_memory, bool requires_grad)
+ * (tuple of ints size, Number fill_value, *, Tensor out, torch.dtype dtype, torch.layout layout, torch.device device, bool pin_memory, bool requires_grad)
+
