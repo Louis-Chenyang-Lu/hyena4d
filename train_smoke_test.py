@@ -84,7 +84,7 @@ def run(cmd, label):
 # 1. Training (2 epochs, smaller batch, all real-run flags exercised)
 # ---------------------------------------------------------------------------
 
-OUTPUT_DIR = "output/smoke_test"
+OUTPUT_DIR = "output_smoke"
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
