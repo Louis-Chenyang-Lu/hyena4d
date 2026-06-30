@@ -242,7 +242,7 @@ class Hyena4DFullPipeline(nn.Module):
         voxel_chunk: int | None,
         voxel_size: tuple = (1.0, 1.0, 1.0),
         t_gap: float = 1.0,
-        memory_efficient: bool = False,
+        memory_efficient: bool = True,
     ):
         super().__init__()
         self.rpe = PermInvariantPatchEmbedding4D(
@@ -463,9 +463,9 @@ def parse_args() -> argparse.Namespace:
                    help="Patches per RPE forward chunk (lower = less RAM)")
     p.add_argument("--voxel-chunk",    type=int,   default=512,
                    help="Voxels per inner RPE chunk (0 = disabled)")
-    p.add_argument("--memory-efficient", action="store_true", default=False,
+    p.add_argument("--memory-efficient", action="store_true", default=True,
                     help="Run RPE one sample at a time to reduce peak memory. "
-                            "Default off (batched RPE). Use on CPU or small GPUs.")
+                            "Default on (batched RPE). Use on CPU or small GPUs.")
     # Training
     p.add_argument("--epochs",         type=int,   default=50,
                    help="Total training epochs")

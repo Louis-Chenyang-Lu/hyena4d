@@ -1,6 +1,6 @@
 #!/bin/bash
 ###########################################################################################################################
-#SBATCH --time=4-00:00:00                      ## total expected computing time
+#SBATCH --time=1-00:00:00                      ## total expected computing time
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=8                      ## number of cores per task (if not specified, default is 1)
@@ -28,9 +28,9 @@ python3 train_hyena.py \
     --subject-field 0 \
     --num-workers 7 \
     --patch-size 9 4 5 10 \
-    --patch-chunk 2500 \
+    --patch-chunk 20 \
     --t-sub 50 \
-    --batch-size 75 \
+    --batch-size 10 \
     --epochs 50 \
 
 

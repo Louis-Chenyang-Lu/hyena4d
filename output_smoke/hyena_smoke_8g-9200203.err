@@ -1,0 +1,41 @@
+Training: 0epoch [00:00, ?epoch/s]Training: 0epoch [00:00, ?epoch/s]
+  Subject embeddings:   0%|          | 0/119 [00:00<?, ?it/s]  Subject embeddings:   1%|          | 1/119 [00:40<1:19:11, 40.26s/it]  Subject embeddings:   3%|▎         | 3/119 [00:40<20:16, 10.49s/it]    Subject embeddings:   4%|▍         | 5/119 [00:40<09:44,  5.13s/it]  Subject embeddings:   6%|▌         | 7/119 [00:40<05:34,  2.98s/it]  Subject embeddings:   8%|▊         | 9/119 [00:40<03:27,  1.88s/it]  Subject embeddings:   9%|▉         | 11/119 [00:40<02:14,  1.25s/it]  Subject embeddings:  11%|█         | 13/119 [00:41<01:30,  1.17it/s]  Subject embeddings:  13%|█▎        | 15/119 [00:41<01:02,  1.67it/s]  Subject embeddings:  14%|█▍        | 17/119 [00:51<03:20,  1.97s/it]  Subject embeddings:  16%|█▌        | 19/119 [00:53<02:48,  1.68s/it]  Subject embeddings:  18%|█▊        | 21/119 [00:53<01:56,  1.18s/it]  Subject embeddings:  19%|█▉        | 23/119 [00:56<02:01,  1.26s/it]  Subject embeddings:  20%|██        | 24/119 [00:57<01:55,  1.22s/it]  Subject embeddings:  22%|██▏       | 26/119 [01:03<02:48,  1.81s/it]  Subject embeddings:  24%|██▎       | 28/119 [01:03<01:52,  1.24s/it]  Subject embeddings:  25%|██▌       | 30/119 [01:09<02:47,  1.88s/it]  Subject embeddings:  26%|██▌       | 31/119 [01:10<02:23,  1.63s/it]  Subject embeddings:  28%|██▊       | 33/119 [01:15<02:46,  1.94s/it]  Subject embeddings:  29%|██▉       | 35/119 [01:15<01:50,  1.32s/it]  Subject embeddings:  31%|███       | 37/119 [01:18<01:48,  1.32s/it]  Subject embeddings:  32%|███▏      | 38/119 [01:18<01:29,  1.10s/it]  Subject embeddings:  34%|███▎      | 40/119 [01:23<02:08,  1.63s/it]  Subject embeddings:  35%|███▌      | 42/119 [01:23<01:25,  1.11s/it]  Subject embeddings:  37%|███▋      | 44/119 [01:29<02:02,  1.63s/it]  Subject embeddings:  38%|███▊      | 45/119 [01:30<01:53,  1.53s/it]  Subject embeddings:  39%|███▊      | 46/119 [01:31<01:56,  1.59s/it]  Subject embeddings:  39%|███▉      | 47/119 [01:36<02:36,  2.17s/it]  Subject embeddings:  41%|████      | 49/119 [01:36<01:33,  1.34s/it]  Subject embeddings:  43%|████▎     | 51/119 [01:41<01:57,  1.73s/it]  Subject embeddings:  44%|████▎     | 52/119 [01:44<02:18,  2.06s/it]  Subject embeddings:  45%|████▍     | 53/119 [01:45<01:59,  1.81s/it]  Subject embeddings:  45%|████▌     | 54/119 [01:47<02:10,  2.01s/it]  Subject embeddings:  47%|████▋     | 56/119 [01:48<01:15,  1.21s/it]  Subject embeddings:  49%|████▊     | 58/119 [01:48<00:47,  1.28it/s]  Subject embeddings:  50%|█████     | 60/119 [01:48<00:31,  1.87it/s]  Subject embeddings:  52%|█████▏    | 62/119 [01:50<00:41,  1.37it/s]  Subject embeddings:  54%|█████▍    | 64/119 [01:50<00:28,  1.94it/s]  Subject embeddings:  55%|█████▌    | 66/119 [01:50<00:19,  2.68it/s]  Subject embeddings:  57%|█████▋    | 68/119 [01:56<01:00,  1.19s/it]  Subject embeddings:  59%|█████▉    | 70/119 [01:56<00:41,  1.19it/s]  Subject embeddings:  61%|██████    | 72/119 [01:57<00:28,  1.65it/s]  Subject embeddings:  62%|██████▏   | 74/119 [01:58<00:27,  1.64it/s]  Subject embeddings:  63%|██████▎   | 75/119 [02:02<00:51,  1.17s/it]  Subject embeddings:  65%|██████▍   | 77/119 [02:02<00:33,  1.25it/s]  Subject embeddings:  66%|██████▋   | 79/119 [02:02<00:22,  1.78it/s]  Subject embeddings:  68%|██████▊   | 81/119 [02:02<00:18,  2.08it/s]  Subject embeddings:  69%|██████▉   | 82/119 [02:06<00:40,  1.09s/it]  Subject embeddings:  71%|███████   | 84/119 [02:06<00:25,  1.37it/s]  Subject embeddings:  72%|███████▏  | 86/119 [02:06<00:16,  1.96it/s]  Subject embeddings:  74%|███████▍  | 88/119 [02:17<01:02,  2.03s/it]  Subject embeddings:  75%|███████▍  | 89/119 [02:25<01:32,  3.08s/it]  Subject embeddings:  76%|███████▋  | 91/119 [02:25<00:56,  2.03s/it]  Subject embeddings:  78%|███████▊  | 93/119 [02:25<00:35,  1.38s/it]  Subject embeddings:  80%|███████▉  | 95/119 [02:28<00:35,  1.47s/it]  Subject embeddings:  81%|████████  | 96/119 [02:35<00:58,  2.55s/it]  Subject embeddings:  82%|████████▏ | 98/119 [02:36<00:35,  1.68s/it]  Subject embeddings:  84%|████████▍ | 100/119 [02:36<00:21,  1.14s/it]  Subject embeddings:  86%|████████▌ | 102/119 [02:36<00:13,  1.25it/s]  Subject embeddings:  87%|████████▋ | 104/119 [02:40<00:17,  1.17s/it]  Subject embeddings:  89%|████████▉ | 106/119 [02:40<00:10,  1.21it/s]  Subject embeddings:  91%|█████████ | 108/119 [02:40<00:06,  1.69it/s]  Subject embeddings:  91%|█████████ | 108/119 [03:00<00:06,  1.69it/s]                                                                       Traceback (most recent call last):
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/utils/data/dataloader.py", line 1133, in _try_get_data
+    data = self._data_queue.get(timeout=timeout)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/multiprocessing/queues.py", line 113, in get
+    if not self._poll(timeout):
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/multiprocessing/connection.py", line 257, in poll
+    return self._poll(timeout)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/multiprocessing/connection.py", line 424, in _poll
+    r = wait([self], timeout)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/multiprocessing/connection.py", line 931, in wait
+    ready = selector.select(timeout)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/selectors.py", line 416, in select
+    fd_event_list = self._selector.poll(timeout)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/utils/data/_utils/signal_handling.py", line 66, in handler
+    _error_if_any_worker_fails()
+RuntimeError: DataLoader worker (pid 873084) is killed by signal: Killed. 
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/u/lomasov2/hyena4d/train_hyena.py", line 629, in <module>
+    main()
+  File "/u/lomasov2/hyena4d/train_hyena.py", line 619, in main
+    subject_embs = compute_subject_embeddings(model, dataset, device, args.batch_size, num_workers)
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/utils/_contextlib.py", line 115, in decorate_context
+    return func(*args, **kwargs)
+  File "/u/lomasov2/hyena4d/train_hyena.py", line 364, in compute_subject_embeddings
+    for vols, sids in tqdm(loader, desc="  Subject embeddings", leave=False):
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/tqdm/std.py", line 1181, in __iter__
+    for obj in iterable:
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/utils/data/dataloader.py", line 631, in __next__
+    data = self._next_data()
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/utils/data/dataloader.py", line 1329, in _next_data
+    idx, data = self._get_data()
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/utils/data/dataloader.py", line 1295, in _get_data
+    success, data = self._try_get_data()
+  File "/u/lomasov2/.conda/envs/hyena4d_linux/lib/python3.10/site-packages/torch/utils/data/dataloader.py", line 1146, in _try_get_data
+    raise RuntimeError(f'DataLoader worker (pid(s) {pids_str}) exited unexpectedly') from e
+RuntimeError: DataLoader worker (pid(s) 873084) exited unexpectedly
+[2026-06-24T17:38:52.146] error: Detected 1 oom_kill event in StepId=9200203.batch. Some of the step tasks have been OOM Killed.

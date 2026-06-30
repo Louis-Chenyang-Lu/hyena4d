@@ -1,0 +1,18 @@
+Device : cuda
+  Physical params : voxel_size=('0.2000', '0.2222', '0.5000') mm  t_gap=1.0000 s  (from header)
+  [Dataset] 1890 subsequences | 225 subjects | t_sub=50 | stride=50
+  [Dataset] Spatial crop : 63×12×30 (min across subjects, aligned to patch sizes 9×4×5)
+  Batches/epoch : 118
+  Trainable params : 193,736
+  torch.compile enabled (first batch will be slow — this is normal)
+  Resumed from 'output/smoke_test/best_model.pt'  (epoch 4, loss 0.0015)
+
+Computing subject-level embeddings (mean pool over subsequences)...
+
+============================================================
+  TRAINING (2 epochs, smoke test)
+============================================================
+
+  [TRAINING (2 epochs, smoke test)] wall time : 189.5 s
+  [TRAINING (2 epochs, smoke test)] peak RAM  : 0.36 GiB
+  [TRAINING (2 epochs, smoke test)] FAILED (returncode=1)
