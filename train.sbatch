@@ -30,7 +30,7 @@ python3 train_hyena.py \
     --patch-size 9 4 5 10 \
     --patch-chunk 20 \
     --t-sub 50 \
-    --batch-size 10 \
+    --batch-size 32 \
     --epochs 50 \
 
 

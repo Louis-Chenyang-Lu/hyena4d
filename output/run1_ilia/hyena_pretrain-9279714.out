@@ -1,0 +1,109 @@
+Device : cuda
+  Physical params : voxel_size=('0.2000', '0.2222', '0.5000') mm  t_gap=1.0000 s  (from header)
+  [Dataset] 1890 subsequences | 225 subjects | t_sub=50 | stride=50
+  [Dataset] Spatial crop : 63×12×30 (min across subjects, aligned to patch sizes 9×4×5)
+  Batches/epoch : 59
+  Trainable params : 193,736
+Epoch 001/50  loss=2.0273
+  Saved : output/run1_secondary_ilia/checkpoint_epoch001.pt
+Epoch 002/50  loss=1.3338
+  Saved : output/run1_secondary_ilia/checkpoint_epoch002.pt
+Epoch 003/50  loss=0.9971
+  Saved : output/run1_secondary_ilia/checkpoint_epoch003.pt
+Epoch 004/50  loss=1.0678
+  Saved : output/run1_secondary_ilia/checkpoint_epoch004.pt
+Epoch 005/50  loss=1.3944
+  Saved : output/run1_secondary_ilia/checkpoint_epoch005.pt
+Epoch 006/50  loss=0.9037
+  Saved : output/run1_secondary_ilia/checkpoint_epoch006.pt
+Epoch 007/50  loss=0.8265
+  Saved : output/run1_secondary_ilia/checkpoint_epoch007.pt
+Epoch 008/50  loss=0.7913
+  Saved : output/run1_secondary_ilia/checkpoint_epoch008.pt
+Epoch 009/50  loss=0.7592
+  Saved : output/run1_secondary_ilia/checkpoint_epoch009.pt
+Epoch 010/50  loss=0.7548
+  Saved : output/run1_secondary_ilia/checkpoint_epoch010.pt
+Epoch 011/50  loss=0.5376
+  Saved : output/run1_secondary_ilia/checkpoint_epoch011.pt
+Epoch 012/50  loss=0.5207
+  Saved : output/run1_secondary_ilia/checkpoint_epoch012.pt
+Epoch 013/50  loss=0.5072
+  Saved : output/run1_secondary_ilia/checkpoint_epoch013.pt
+Epoch 014/50  loss=0.3994
+  Saved : output/run1_secondary_ilia/checkpoint_epoch014.pt
+Epoch 015/50  loss=0.4254
+  Saved : output/run1_secondary_ilia/checkpoint_epoch015.pt
+Epoch 016/50  loss=0.4660
+  Saved : output/run1_secondary_ilia/checkpoint_epoch016.pt
+Epoch 017/50  loss=0.4835
+  Saved : output/run1_secondary_ilia/checkpoint_epoch017.pt
+Epoch 018/50  loss=0.3989
+  Saved : output/run1_secondary_ilia/checkpoint_epoch018.pt
+Epoch 019/50  loss=0.3458
+  Saved : output/run1_secondary_ilia/checkpoint_epoch019.pt
+Epoch 020/50  loss=0.4555
+  Saved : output/run1_secondary_ilia/checkpoint_epoch020.pt
+Epoch 021/50  loss=0.2758
+  Saved : output/run1_secondary_ilia/checkpoint_epoch021.pt
+Epoch 022/50  loss=0.3272
+  Saved : output/run1_secondary_ilia/checkpoint_epoch022.pt
+Epoch 023/50  loss=0.5547
+  Saved : output/run1_secondary_ilia/checkpoint_epoch023.pt
+Epoch 024/50  loss=0.3649
+  Saved : output/run1_secondary_ilia/checkpoint_epoch024.pt
+Epoch 025/50  loss=0.3321
+  Saved : output/run1_secondary_ilia/checkpoint_epoch025.pt
+Epoch 026/50  loss=0.3860
+  Saved : output/run1_secondary_ilia/checkpoint_epoch026.pt
+Epoch 027/50  loss=0.2780
+  Saved : output/run1_secondary_ilia/checkpoint_epoch027.pt
+Epoch 028/50  loss=0.3099
+  Saved : output/run1_secondary_ilia/checkpoint_epoch028.pt
+Epoch 029/50  loss=0.2842
+  Saved : output/run1_secondary_ilia/checkpoint_epoch029.pt
+Epoch 030/50  loss=0.3525
+  Saved : output/run1_secondary_ilia/checkpoint_epoch030.pt
+Epoch 031/50  loss=0.3736
+  Saved : output/run1_secondary_ilia/checkpoint_epoch031.pt
+Epoch 032/50  loss=0.3175
+  Saved : output/run1_secondary_ilia/checkpoint_epoch032.pt
+Epoch 033/50  loss=0.3082
+  Saved : output/run1_secondary_ilia/checkpoint_epoch033.pt
+Epoch 034/50  loss=0.3439
+  Saved : output/run1_secondary_ilia/checkpoint_epoch034.pt
+Epoch 035/50  loss=0.2740
+  Saved : output/run1_secondary_ilia/checkpoint_epoch035.pt
+Epoch 036/50  loss=0.2040
+  Saved : output/run1_secondary_ilia/checkpoint_epoch036.pt
+Epoch 037/50  loss=0.2559
+  Saved : output/run1_secondary_ilia/checkpoint_epoch037.pt
+Epoch 038/50  loss=0.3341
+  Saved : output/run1_secondary_ilia/checkpoint_epoch038.pt
+Epoch 039/50  loss=0.2286
+  Saved : output/run1_secondary_ilia/checkpoint_epoch039.pt
+Epoch 040/50  loss=0.3306
+  Saved : output/run1_secondary_ilia/checkpoint_epoch040.pt
+Epoch 041/50  loss=0.3186
+  Saved : output/run1_secondary_ilia/checkpoint_epoch041.pt
+Epoch 042/50  loss=0.3903
+  Saved : output/run1_secondary_ilia/checkpoint_epoch042.pt
+Epoch 043/50  loss=0.2374
+  Saved : output/run1_secondary_ilia/checkpoint_epoch043.pt
+Epoch 044/50  loss=0.3325
+  Saved : output/run1_secondary_ilia/checkpoint_epoch044.pt
+Epoch 045/50  loss=0.2914
+  Saved : output/run1_secondary_ilia/checkpoint_epoch045.pt
+Epoch 046/50  loss=0.2356
+  Saved : output/run1_secondary_ilia/checkpoint_epoch046.pt
+Epoch 047/50  loss=0.2877
+  Saved : output/run1_secondary_ilia/checkpoint_epoch047.pt
+Epoch 048/50  loss=0.2386
+  Saved : output/run1_secondary_ilia/checkpoint_epoch048.pt
+Epoch 049/50  loss=0.2507
+  Saved : output/run1_secondary_ilia/checkpoint_epoch049.pt
+Epoch 050/50  loss=0.2098
+  Saved : output/run1_secondary_ilia/checkpoint_epoch050.pt
+
+Computing subject-level embeddings (mean pool over subsequences)...
+Saved : output/run1_secondary_ilia/subject_embeddings.pt  (225 subjects, shape (225, 128))
