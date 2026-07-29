@@ -1,6 +1,6 @@
 #!/bin/bash
 ###########################################################################################################################
-#SBATCH --time=1-00:00:00                      ## total expected computing time
+#SBATCH --time=04:00:00                      ## total expected computing time
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=8                      ## number of cores per task (if not specified, default is 1)
@@ -8,10 +8,10 @@
 #SBATCH --mem=32G                              ## total memory required(entire memory,if not specified)
 ##–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 #SBATCH --job-name="hyena_pretrain"            ## specify a custom name for the job
-#SBATCH --output=output/run1_ilia/%x-%j.out    ## specify the output file name pattern, %x for job name and %j for job id
-#SBATCH --error=output/run1_ilia/%x-%j.err     ## specify the error file name pattern, %x for job name and %j for job id
+#SBATCH --output=output/run2_ilia/%x-%j.out    ## specify the output file name pattern, %x for job name and %j for job id
+#SBATCH --error=output/run2_ilia/%x-%j.err     ## specify the error file name pattern, %x for job name and %j for job id
 #SBATCH --account=stat                         ## account to charge for the job
-#SBATCH --partition=stat,statstudent	       ## queue. select between stat, statstudent, secondary, scavenger (preemptible, not recommended for long jobs without checkpointing)
+#SBATCH --partition=secondary	               ## queue. select between stat, statstudent, secondary, scavenger (preemptible, not recommended for long jobs without checkpointing)
 #SBATCH --mail-type=ALL                        ## (NONE, BEGIN, END, FAIL, ALL)
 #SBATCH --mail-user="lomasov2@illinois.edu"    ## email address to notify
 ###########################################################################################################################
@@ -20,11 +20,11 @@ source /sw/apps/anaconda3/2024.10/etc/profile.d/conda.sh
 conda activate hyena4d_linux
 
 # make output directory if it doesn't exist
-mkdir -p output/run1_ilia
+mkdir -p output/run2_ilia
 
 python3 train_hyena.py \
     --input-dir input/pretrain/normalized \
-    --output-dir output/run1_ilia \
+    --output-dir output/run2_ilia \
     --subject-field 0 \
     --num-workers 7 \
     --patch-size 9 4 5 10 \
